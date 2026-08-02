@@ -1,0 +1,65 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "game",
+      "displayName": "Pico 2: game demo",
+      "description": "Replaces set_pico_game_build.py. Configuration lives here, not in rewritten source.",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "MR_APP": "GAME", "MR_TILE_H": "240" }
+    },
+    {
+      "name": "stress-visible",
+      "inherits": "game",
+      "displayName": "Pico 2: stress test, full flush every frame",
+      "binaryDir": "${sourceDir}/build-stress-visible",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "visible",
+        "MR_STRESS_SPRITES": "512"
+      }
+    },
+    {
+      "name": "stress-lace",
+      "inherits": "stress-visible",
+      "displayName": "Pico 2: stress test, temporal row groups (fast)",
+      "binaryDir": "${sourceDir}/build-stress-lace",
+      "cacheVariables": {
+        "MR_STRESS_MODE": "lace",
+        "MR_STRESS_SPRITES": "1024",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "85000000"
+      }
+    },
+    {
+      "name": "stress-render",
+      "inherits": "stress-visible",
+      "displayName": "Pico 2: renderer-only, serial FPS reporting",
+      "binaryDir": "${sourceDir}/build-stress-render",
+      "cacheVariables": {
+        "MR_STRESS_MODE": "render",
+        "MR_STRESS_SPRITES": "1024",
+        "MR_STRESS_PICO_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "stress-dirtyrect",
+      "inherits": "stress-visible",
+      "displayName": "Pico 2: coalesced dirty-rectangle flush",
+      "binaryDir": "${sourceDir}/build-stress-dirtyrect",
+      "cacheVariables": {
+        "MR_STRESS_MODE": "dirtyrect",
+        "MR_TILE_H": "16",
+        "MR_STRESS_SPRITES": "512"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "game",             "configurePreset": "game" },
+    { "name": "stress-visible",   "configurePreset": "stress-visible" },
+    { "name": "stress-lace",      "configurePreset": "stress-lace" },
+    { "name": "stress-render",    "configurePreset": "stress-render" },
+    { "name": "stress-dirtyrect", "configurePreset": "stress-dirtyrect" }
+  ]
+}

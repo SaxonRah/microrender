@@ -1,0 +1,39 @@
+{
+  "name": "MicroRender Demo Game",
+  "transparent_index": 0,
+  "maps": [
+    {
+      "name": "level01",
+      "file": "maps/demo_map.json"
+    }
+  ],
+  "sprites": [
+    {
+      "name": "pickup",
+      "file": "sprites/pickup.bmp",
+      "rle": true,
+      "key": 0
+    },
+    {
+      "name": "tiles",
+      "file": "sprites/tiles.bmp",
+      "rle": false,
+      "key": 0
+    }
+  ],
+  "aseprite": [
+    {
+      "prefix": "player",
+      "sheet": "sprites/player_sheet.bmp",
+      "json": "sprites/player_sheet.json",
+      "rle": true,
+      "key": 0
+    }
+  ],
+  "audio": [
+    {
+      "name": "pickup_blip",
+      "file": "audio/pickup.wav"
+    }
+  ]
+}

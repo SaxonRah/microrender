@@ -1,0 +1,166 @@
+@echo off
+rem Shared-source MicroRender Open Watcom DOS build.
+setlocal EnableExtensions
+cd /d "%~dp0"
+
+set "TARGET=%~1"
+if "%TARGET%"=="" set "TARGET=dos16"
+if /I "%TARGET%"=="clean" goto clean
+if /I "%TARGET%"=="rebuild" (
+    call "%~f0" clean
+    if errorlevel 1 goto fail
+    set "TARGET=%~2"
+    if "%TARGET%"=="" set "TARGET=dos16"
+)
+if /I not "%TARGET%"=="dos16" if /I not "%TARGET%"=="dos" (
+    echo ERROR: unknown target "%TARGET%"
+    echo Use: dos16, dos, clean, rebuild [dos16]
+    exit /b 1
+)
+
+call :check_watcom
+if errorlevel 1 goto fail
+call :make_dirs
+if errorlevel 1 goto fail
+
+set "OBJDIR=build\obj\dos16"
+set "ERRDIR=build\err\dos16"
+if not exist "%OBJDIR%" mkdir "%OBJDIR%"
+if not exist "%ERRDIR%" mkdir "%ERRDIR%"
+set "EXE=dist\mrender.exe"
+
+rem DOS is native VGA INDEX8. Shared renderer code decides color type from this define.
+set "CFLAGS=-q -bt=dos -ml -2 -ox -s -w4 -dGFX_FIXED_NO_INT64 -dGFX_COLOR_INDEX8=1 -dGFX_ENABLE_TRIANGLES=1 -i=..\shared\src -i=dos"
+set "LFLAGS=-q -bt=dos -ml"
+
+echo Building MicroRender 16-bit DOS large-model target from ..\shared\src...
+echo WATCOM: %WATCOM%
+echo Compiler: %OW_WCC%
+echo Linker: %OW_WCL%
+
+call :compile ..\shared\src\gfx.c "%OBJDIR%\gfx.obj" "%ERRDIR%\gfx.err"
+if errorlevel 1 goto fail
+call :compile ..\shared\src\gfx_font5x7.c "%OBJDIR%\gfx_font5x7.obj" "%ERRDIR%\gfx_font5x7.err"
+if errorlevel 1 goto fail
+call :compile ..\shared\src\gfx_triangle.c "%OBJDIR%\gfx_triangle.obj" "%ERRDIR%\gfx_triangle.err"
+if errorlevel 1 goto fail
+call :compile ..\shared\src\gfx_engine.c "%OBJDIR%\gfx_engine.obj" "%ERRDIR%\gfx_engine.err"
+if errorlevel 1 goto fail
+if exist ..\shared\src\gfx_pack.c (
+    call :compile ..\shared\src\gfx_pack.c "%OBJDIR%\gfx_pack.obj" "%ERRDIR%\gfx_pack.err"
+    if errorlevel 1 goto fail
+    set "PACKOBJ=%OBJDIR%\gfx_pack.obj"
+) else (
+    set "PACKOBJ="
+)
+call :compile ..\shared\src\mr_autodemo.c "%OBJDIR%\mr_autodemo.obj" "%ERRDIR%\mr_autodemo.err"
+if errorlevel 1 goto fail
+call :compile ..\shared\src\mr_game_demo.c "%OBJDIR%\mr_game_demo.obj" "%ERRDIR%\mr_game_demo.err"
+if errorlevel 1 goto fail
+call :compile dos\dos_main.c "%OBJDIR%\dos_main.obj" "%ERRDIR%\dos_main.err"
+if errorlevel 1 goto fail
+call :compile dos\dos_app.c "%OBJDIR%\dos_app.obj" "%ERRDIR%\dos_app.err"
+call :compile dos\dos_keyboard.c "%OBJDIR%\dos_keyboard.obj" "%ERRDIR%\dos_keyboard.err"
+call :compile dos\dos_vga.c "%OBJDIR%\dos_vga.obj" "%ERRDIR%\dos_vga.err"
+if errorlevel 1 goto fail
+
+echo Linking %EXE%...
+if "%PACKOBJ%"=="" (
+    "%OW_WCL%" %LFLAGS% -fe="%EXE%" ^
+     "%OBJDIR%\dos_main.obj" ^
+     "%OBJDIR%\dos_app.obj" ^
+     "%OBJDIR%\dos_keyboard.obj" ^
+     "%OBJDIR%\dos_vga.obj" ^
+     "%OBJDIR%\gfx.obj" ^
+     "%OBJDIR%\gfx_font5x7.obj" ^
+     "%OBJDIR%\gfx_triangle.obj" ^
+     "%OBJDIR%\gfx_engine.obj" ^
+     "%OBJDIR%\mr_autodemo.obj" ^
+     "%OBJDIR%\mr_game_demo.obj" > "%ERRDIR%\link.err" 2>&1
+) else (
+    "%OW_WCL%" %LFLAGS% -fe="%EXE%" ^
+     "%OBJDIR%\dos_main.obj" ^
+     "%OBJDIR%\dos_app.obj" ^
+     "%OBJDIR%\dos_keyboard.obj" ^
+     "%OBJDIR%\dos_vga.obj" ^
+     "%OBJDIR%\gfx.obj" ^
+     "%OBJDIR%\gfx_font5x7.obj" ^
+     "%OBJDIR%\gfx_triangle.obj" ^
+     "%OBJDIR%\gfx_engine.obj" ^
+     "%PACKOBJ%" ^
+     "%OBJDIR%\mr_autodemo.obj" ^
+     "%OBJDIR%\mr_game_demo.obj" > "%ERRDIR%\link.err" 2>&1
+)
+if errorlevel 1 (
+    type "%ERRDIR%\link.err"
+    echo ERROR: link failed.
+    goto fail
+)
+
+echo.
+echo Build OK: %EXE%
+goto done
+
+:check_watcom
+if "%WATCOM%"=="" set "WATCOM=C:\WATCOM"
+if exist "%WATCOM%\BINNT\wcc.exe" (
+    set "OW_WCC=%WATCOM%\BINNT\wcc.exe"
+) else if exist "%WATCOM%\BINW\wcc.exe" (
+    set "OW_WCC=%WATCOM%\BINW\wcc.exe"
+) else (
+    echo ERROR: wcc.exe not found under "%WATCOM%".
+    exit /b 1
+)
+if exist "%WATCOM%\BINNT\wcl.exe" (
+    set "OW_WCL=%WATCOM%\BINNT\wcl.exe"
+) else if exist "%WATCOM%\BINW\wcl.exe" (
+    set "OW_WCL=%WATCOM%\BINW\wcl.exe"
+) else (
+    echo ERROR: wcl.exe not found under "%WATCOM%".
+    exit /b 1
+)
+set "PATH=%WATCOM%\BINNT;%WATCOM%\BINW;%PATH%"
+set "INCLUDE=%WATCOM%\H;%WATCOM%\H\NT;%INCLUDE%"
+set "EDPATH=%WATCOM%\EDDAT"
+exit /b 0
+
+:make_dirs
+if not exist build mkdir build
+if not exist build\obj mkdir build\obj
+if not exist build\err mkdir build\err
+if not exist dist mkdir dist
+exit /b 0
+
+:compile
+set "SRC=%~1"
+set "OBJ=%~2"
+set "ERR=%~3"
+echo Compiling %SRC%...
+"%OW_WCC%" %CFLAGS% -fo="%OBJ%" "%SRC%" > "%ERR%" 2>&1
+if errorlevel 1 (
+    type "%ERR%"
+    echo ERROR: compile failed: %SRC%
+    exit /b 1
+)
+exit /b 0
+
+:clean
+cd /d "%~dp0"
+echo Cleaning MicroRender DOS build output...
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
+if exist *.obj del /q *.obj
+if exist *.err del /q *.err
+if exist *.map del /q *.map
+if exist mrender.exe del /q mrender.exe
+echo Clean OK.
+goto done
+
+:fail
+echo.
+echo Build FAILED.
+echo Check build\err\dos16 for compiler/linker error files if they were created.
+exit /b 1
+
+:done
+endlocal

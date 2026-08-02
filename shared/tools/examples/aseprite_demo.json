@@ -1,0 +1,30 @@
+{
+  "frames": {
+    "player_0": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 16,
+        "h": 16
+      },
+      "duration": 120
+    },
+    "player_1": {
+      "frame": {
+        "x": 16,
+        "y": 0,
+        "w": 16,
+        "h": 16
+      },
+      "duration": 120
+    }
+  },
+  "meta": {
+    "app": "aseprite",
+    "size": {
+      "w": 32,
+      "h": 16
+    },
+    "scale": "1"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Host tests (ASan + UBSan, RGB565)",
+      "description": "Unit tests and fuzz harness for the shared renderer core. Needs no Pico SDK, Watcom or DOSBox.",
+      "binaryDir": "${sourceDir}/../build/tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MR_TESTS_WERROR": "ON"
+      }
+    },
+    {
+      "name": "index8",
+      "inherits": "debug",
+      "displayName": "Host tests, 8-bit palette (the DOS pixel format)",
+      "binaryDir": "${sourceDir}/../build/tests-index8",
+      "cacheVariables": { "MR_TESTS_INDEX8": "ON" }
+    },
+    {
+      "name": "bench",
+      "displayName": "Host benchmark (optimised, no sanitizers)",
+      "binaryDir": "${sourceDir}/../build/bench",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug",  "configurePreset": "debug" },
+    { "name": "index8", "configurePreset": "index8" },
+    { "name": "bench",  "configurePreset": "bench" }
+  ],
+  "testPresets": [
+    { "name": "debug",  "configurePreset": "debug",  "output": { "outputOnFailure": true } },
+    { "name": "index8", "configurePreset": "index8", "output": { "outputOnFailure": true } }
+  ]
+}
