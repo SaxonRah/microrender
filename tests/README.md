@@ -15,14 +15,17 @@ Or with presets: `cmake --preset debug && ctest --preset debug`.
 
 **`mr_test_unit.c`** — behavioural assertions, not smoke tests.
 
-The centrepiece is `test_blit_path_equivalence`. The four blit paths (raw,
-colorkey, RLE linear scan, RLE with row-start index) are four implementations
-of one specification, so they must produce identical output. The test renders
-the same sprite through all four at 132 positions — every screen edge, both
+The centrepiece is `test_blit_path_equivalence`. The three
+transparency-preserving blit paths (colorkey, linear-scan RLE, RLE with a
+row-start index) are three implementations of one specification, so they must
+produce identical output. The test renders the same sprite through all three at
+132 positions — every screen edge, both
 sides of every 16-row tile seam, partially and fully offscreen — and compares
 framebuffers byte for byte. A disagreement localises the bug to whichever path
 is the odd one out, which is what makes it safe to keep optimising the RLE
-path.
+path. The raw opaque path is excluded on purpose: it writes every pixel,
+including the ones the transparent paths skip, so it implements a different
+specification and has its own alignment test.
 
 The rest covers blit pixel alignment, colorkey transparency, `fill_rect` and
 clip-window boundaries (inclusive lower, exclusive upper), rect algebra

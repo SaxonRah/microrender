@@ -79,8 +79,8 @@ The shared core compiles clean under `-Wall -Wextra -Wpedantic -Wshadow
 CI runs on Linux, macOS and Windows, in both pixel formats, with
 AddressSanitizer and UndefinedBehaviorSanitizer and `-fno-sanitize-recover`:
 
-- **Unit tests.** The most important one renders the same sprite through all
-  four blit paths at 132 positions — every screen edge, both sides of every
+- **Unit tests.** The most important one renders the same sprite through the
+  three transparency-preserving blit paths at 132 positions — every screen edge, both sides of every
   tile seam, fully offscreen — and compares the framebuffers byte for byte.
   Four implementations of one specification, so any disagreement localises the
   bug immediately.

@@ -1,11 +1,15 @@
 /* MicroRender unit tests.
  *
  * These assert behaviour, not just absence of crashes. The most important one
- * is test_blit_path_equivalence: the four blit paths (raw, colorkey, RLE,
- * RLE+row-index) are four implementations of one specification, so any
- * disagreement between them at any position is a bug in whichever one is the
- * odd man out. That property is what makes it safe to keep optimising the RLE
- * path.
+ * is test_blit_path_equivalence. The three transparency-preserving paths
+ * (colorkey, linear RLE, RLE+row-index) are three implementations of one
+ * specification, so any disagreement between them at any position is a bug in
+ * whichever one is the odd man out. That property is what makes it safe to keep
+ * optimising the RLE path.
+ *
+ * The raw opaque path is deliberately NOT in that comparison: it writes every
+ * pixel including the ones the transparent paths skip, so it implements a
+ * different specification. It gets its own alignment test instead.
  */
 #include "mr_test_support.h"
 #include "gfx_engine.h"
@@ -107,7 +111,8 @@ static void test_colorkey_transparency(void) {
   mrt_fb_free(&fb);
 }
 
-/* The core invariant: every blit path renders the same image, everywhere. */
+/* The core invariant: every transparency-preserving blit path renders the same
+   image, everywhere. Raw opaque is excluded by design, see the file header. */
 static void test_blit_path_equivalence(void) {
   static const int xs[] = {-SW, -SW + 1, -5, 0, 1, 37, W - SW - 1,
                            W - SW,       W - 3, W, W + 5};
@@ -143,8 +148,8 @@ static void test_blit_path_equivalence(void) {
     }
   }
 
-  printf("  (%d sprite positions compared, including all four edges and both\n"
-         "   sides of the %dpx tile seams)\n",
+  printf("  (3 paths x %d sprite positions, including all four screen edges\n"
+         "   and both sides of the %dpx tile seams)\n",
          positions, TH);
   MRT_CHECK_EQ_INT(diff_rle, 0, "RLE vs colorkey mismatches");
   MRT_CHECK_EQ_INT(diff_idx, 0, "RLE+rowindex vs colorkey mismatches");

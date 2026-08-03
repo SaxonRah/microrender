@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    name: ${{ matrix.os }} / ${{ matrix.pixel_format }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        pixel_format: [rgb565, index8]
+        include:
+          - pixel_format: rgb565
+            index8: "OFF"
+          - pixel_format: index8
+            index8: "ON"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The shared renderer core is compiled with -Werror under
+      # -Wall -Wextra -Wpedantic -Wshadow -Wconversion and friends, then the
+      # unit tests and fuzz harness run under ASan + UBSan with
+      # -fno-sanitize-recover, so undefined behaviour aborts rather than warns.
+      - name: Configure
+        run: >
+          cmake -S tests -B build-tests
+          -DCMAKE_BUILD_TYPE=Debug
+          -DMR_TESTS_INDEX8=${{ matrix.index8 }}
+          -DMR_TESTS_WERROR=ON
+
+      - name: Build
+        run: cmake --build build-tests --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build-tests --build-config Debug --output-on-failure
+
+  benchmark:
+    name: benchmark (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tests -B build-bench -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-bench --parallel
+      # Runner performance varies, so this is recorded for inspection rather
+      # than asserted against a threshold. The ratios between rows are the
+      # meaningful part, not the absolute numbers.
+      - name: Run benchmark
+        run: ./build-bench/mr_test_bench 200 | tee "$GITHUB_STEP_SUMMARY"
+
+  asset-pipeline:
+    name: asset pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Rebuild the pack from source assets and confirm the committed
+      # generated files are not stale.
+      - name: Rebuild asset pack
+        working-directory: shared
+        run: |
+          python tools/mr_pack.py \
+            --manifest assets/project.json \
+            -o /tmp/GAME.MRP \
+            --header /tmp/game_mrp.h \
+            --symbol game_mrp
+      - name: Compare against committed pack
+        run: |
+          if ! cmp -s /tmp/GAME.MRP shared/generated/GAME.MRP; then
+            echo "::warning::shared/generated/GAME.MRP is out of date; run: mr build assets"
+          fi

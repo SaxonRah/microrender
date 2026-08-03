@@ -1,9 +1,10 @@
 # Script consolidation
 
-The original repository carried 37 individual batch/PowerShell scripts. Most differed only in one or two hardcoded arguments: six `run_stress_*` variants
+The repository carried 37 batch/PowerShell scripts. Most differed from a
+neighbour only in one or two hardcoded arguments: six `run_stress_*` variants
 that changed sprite count and a render-only flag, three `set_pico_*` wrappers
 around a source-rewriting Python patcher, two `copy_to_*` aliases for the same
-copy. I've consolidated all scripts into a single script chain with arguments. 
+copy.
 
 Variants are now arguments. Five scripts remain.
 
@@ -29,23 +30,23 @@ Pico variants are CMake presets rather than scripts: `game`, `stress-visible`,
 
 ## What the old scripts map to
 
-| Example Script Commands |
-| --- |
-| `mr build all` |
-| `mr build assets` |
-| `mr build dos` |
-| `mr build pico` |
-| `mr build dos && mr run dos` |
-| `mr build dos && mr run stress 512` |
-| `mr run stress 1024` |
-| `mr run stress 1024 2100 /noflush` |
-| `mr run dos` |
-| `mr run dos /auto` |
-| `mr run stress <n> <frames>` |
-| `mr build dos` |
-| `mr build pico stress-visible` |
-| `mr build pico stress-lace` |
-| CMake presets |
+| old | new |
+| --- | --- |
+| `build_all_targets.bat` | `mr build all` |
+| `build_assets_all.bat` | `mr build assets` |
+| `build_dos_shared.bat`, `build_and_copy.bat`, `build_dos16.bat` | `mr build dos` |
+| `build_pico2_shared.bat`, `microrender/build_pico*.bat` | `mr build pico` |
+| `build_copy_run.bat` | `mr build dos && mr run dos` |
+| `build_copy_run_stress_512.bat` | `mr build dos && mr run stress 512` |
+| `build_copy_run_stress_1024.bat` | `mr run stress 1024` |
+| `build_copy_run_stress_*_renderonly.bat` | `mr run stress 1024 2100 /noflush` |
+| `run_dosbox_mrender.bat` | `mr run dos` |
+| `run_dosbox_dirty.bat` | `mr run dos /auto` |
+| `run_stress_*_dosbox.bat` (4 files) | `mr run stress <n> <frames>` |
+| `copy_to_dosroot.bat`, `copy_to_dosfiles.bat` | folded into `mr build dos` |
+| `pico_clean_pixels.bat` | `mr build pico stress-visible` |
+| `pico_fast_fps.bat` | `mr build pico stress-lace` |
+| `shared/tools/set_pico_*.bat` | CMake presets |
 
 `build_watcom.bat` and `build_watcom_stress.bat` are kept as the actual Open
 Watcom invocations and are called by `mr build dos`. `start_watcom_here.bat`
