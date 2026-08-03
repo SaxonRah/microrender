@@ -35,7 +35,10 @@ endif()
 # options
 # ---------------------------------------------------------------------------
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+# GCC and Clang sanitizer builds are the default in Debug. MSVC ASan is
+# opt-in: hosted VS2026 runners have been observed hanging in the tests,
+# so normal Windows correctness testing must not silently enable it.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MSVC)
     set(MR_TESTS_SANITIZE_DEFAULT ON)
 else()
     set(MR_TESTS_SANITIZE_DEFAULT OFF)
@@ -99,8 +102,9 @@ add_library(mr_sanitizers INTERFACE)
 if(MR_TESTS_SANITIZE)
     if(MSVC)
         message(WARNING
-            "MR_TESTS_SANITIZE is on but only AddressSanitizer is available "
-            "under MSVC; UBSan checks will be skipped.")
+            "MR_TESTS_SANITIZE is explicitly enabled under MSVC. Only "
+            "AddressSanitizer is available (no UBSan), and some hosted "
+            "VS2026 jobs have hung while running the tests.")
         target_compile_options(mr_sanitizers INTERFACE /fsanitize=address)
     else()
         target_compile_options(mr_sanitizers INTERFACE
@@ -144,15 +148,17 @@ endif()
 enable_testing()
 
 add_test(NAME unit COMMAND mr_test_unit)
+set_tests_properties(unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
 # Several seeds, so a regression that only shows up for particular geometry has
 # somewhere to surface. Each is deterministic and reproducible from its seed.
+# Every seed has its own timeout so a broken harness cannot occupy a CI runner
+# for hours after another test has already timed out.
 foreach(seed 0x5EED 0xC0FFEE 0xBADF00D 0x1337)
     add_test(NAME fuzz_${seed}
              COMMAND mr_test_fuzz ${MR_FUZZ_ITERATIONS} ${seed})
+    set_tests_properties(fuzz_${seed} PROPERTIES TIMEOUT 120 LABELS "fuzz")
 endforeach()
-
-set_tests_properties(unit PROPERTIES TIMEOUT 120)
 
 message(STATUS "MicroRender tests: build=${CMAKE_BUILD_TYPE} "
                "sanitize=${MR_TESTS_SANITIZE} index8=${MR_TESTS_INDEX8}")

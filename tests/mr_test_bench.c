@@ -5,9 +5,9 @@
  * useful for the thing it is actually for, which is comparing renderer
  * configurations against each other under identical conditions.
  *
- * The headline result is that RLE with a linear run scan is *slower* than a
- * plain per-pixel colorkey blit, because each tile re-walks every run in the
- * sprite. The row-start index is what makes RLE worth using at all.
+ * Linear-scan RLE is highly machine-dependent: it can lose to or roughly
+ * tie the plain per-pixel colorkey path because each tile re-walks every run
+ * in the sprite. The row-start index is the robust optimisation being measured.
  *
  * Usage: mr_test_bench [frames]
  */
@@ -84,9 +84,17 @@ static void bench_blit_paths(mrt_fb_t *fb, gfx_color_t *tile, int frames) {
          f_rle / f_key);
   printf("  %-24s %10.1f fps   %5.2fx   (%d runs)\n", "RLE + row-start index",
          f_idx, f_idx / f_key, s_rle_idx.run_count);
-  printf("\n  Baseline is the colorkey path. Note that linear-scan RLE loses to\n"
-         "  it: without the row index each tile re-walks all %d runs.\n\n",
-         s_rle.run_count);
+  printf("\n  Baseline is the colorkey path. ");
+  if (f_rle < f_key) {
+    printf("Linear-scan RLE was %.1f%% slower on this run.\n",
+           (1.0 - f_rle / f_key) * 100.0);
+  } else {
+    printf("Linear-scan RLE was %.1f%% faster on this run.\n",
+           (f_rle / f_key - 1.0) * 100.0);
+  }
+  printf("  Without the row index each tile still re-walks all %d runs; the\n"
+         "  indexed path is %.2fx faster than the linear scan here.\n\n",
+         s_rle.run_count, f_idx / f_rle);
 }
 
 static void bench_tile_heights(mrt_fb_t *fb, gfx_color_t *tile, int frames) {

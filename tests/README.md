@@ -59,9 +59,13 @@ failure instead of silent corruption of an adjacent global.
 
 | option | default | meaning |
 | --- | --- | --- |
-| `MR_TESTS_SANITIZE` | on in Debug | ASan + UBSan with `-fno-sanitize-recover` |
+| `MR_TESTS_SANITIZE` | on in Debug for GCC/Clang; off for MSVC | ASan + UBSan on GCC/Clang; opt-in ASan-only on MSVC |
 | `MR_TESTS_WERROR` | `ON` | `-Werror` on the shared core |
 | `MR_TESTS_INDEX8` | `OFF` | build the core in the DOS 8-bit palette format |
 | `MR_FUZZ_ITERATIONS` | 300 | iterations per ctest fuzz run |
 
-CI runs the matrix of both pixel formats across Linux, macOS and Windows.
+CI runs both pixel formats under ASan+UBSan on pinned Linux and macOS
+runners. Windows is pinned to Windows Server 2022 and Visual Studio 2022, with
+sanitizers explicitly disabled: this provides mandatory MSVC correctness
+coverage while avoiding a hosted VS2026/MSVC-ASan test hang. Every unit and
+fuzz test has an individual timeout, and each job has a hard wall-clock limit.
