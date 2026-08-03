@@ -15,3 +15,4 @@ microrender_dos/GAME.MRP
 microrender_dos/dosroot/GAME.MRP
 *.bak
 *.avi
+/build
