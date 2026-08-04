@@ -4,10 +4,12 @@
 *.obj
 
 # MicroRender generated/build output
+/build/
 _legacy_unused/
 shared/build/
 shared/generated/
 microrender/build/
+microrender/build-*/
 microrender_dos/build/
 microrender_dos/dist/
 microrender_dos/game/build/
@@ -15,10 +17,3 @@ microrender_dos/GAME.MRP
 microrender_dos/dosroot/GAME.MRP
 *.bak
 *.avi
-/build
-/microrender/build-game-raw
-/microrender/build-stress-dirtyrect
-/microrender/build-stress-lace
-/microrender/build-stress-raw
-/microrender/build-stress-render
-/microrender/build-stress-visible

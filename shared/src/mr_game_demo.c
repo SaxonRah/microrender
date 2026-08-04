@@ -4,9 +4,11 @@
 #include <string.h>
 
 #define MR_GAME_PLAYER_SPEED 3
+#define MR_GAME_PLAYER_SLOW_SPEED 1
 #define MR_GAME_DEADZONE_W 112
 #define MR_GAME_DEADZONE_H 72
 #define MR_GAME_SOLID_MASK GFX_TILE_SOLID
+#define MR_GAME_TILE_SLOW 3
 #define MR_GAME_TRIGGER_PICKUP 1
 #define MR_GAME_TRIGGER_MESSAGE 2
 
@@ -87,7 +89,6 @@ static void mr_game_make_map(mr_game_demo_t *demo) {
         solid = 1;
       } else if (x > 36 && x < 48 && y > 8 && y < 17) {
         tile = 3;
-        solid = 1;
       } else if (((x + y) % 17) == 0) {
         tile = 7;
       } else if ((x > 2 && x < 58 && (y == 6 || y == 7)) ||
@@ -297,9 +298,12 @@ static void mr_game_make_world_objects(mr_game_demo_t *demo) {
   int i;
   static const int enemy_pos[5][2] = {
       {220, 96}, {410, 170}, {650, 260}, {760, 620}, {290, 720}};
+  /* Each 12x12 pickup is centred inside one verified walkable 16x16 tile.
+     Pickup five intentionally demonstrates that the blue terrain is slow,
+     not solid. */
   static const int pickup_pos[10][2] = {
-      {128, 96},  {248, 128}, {384, 112}, {560, 224}, {712, 168},
-      {192, 420}, {444, 404}, {612, 520}, {840, 424}, {760, 744}};
+      {130, 98},  {242, 130}, {386, 114}, {562, 226}, {706, 162},
+      {210, 418}, {434, 418}, {610, 514}, {834, 418}, {754, 738}};
 
   demo->actor_count = 0;
   demo->player_index = 0;
@@ -348,6 +352,63 @@ static void mr_game_make_world_objects(mr_game_demo_t *demo) {
 static int mr_game_rects_overlap(gfx_rect_t a, gfx_rect_t b) {
   return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y ||
            b.y + b.h <= a.y);
+}
+
+static int mr_game_rect_overlaps_tile(const mr_game_demo_t *demo,
+                                      gfx_rect_t rect, int wanted_tile) {
+  int tx0;
+  int ty0;
+  int tx1;
+  int ty1;
+  int tx;
+  int ty;
+
+  if (!demo || rect.w <= 0 || rect.h <= 0)
+    return 0;
+
+  tx0 = rect.x / MR_GAME_TILE_SIZE;
+  ty0 = rect.y / MR_GAME_TILE_SIZE;
+  tx1 = (rect.x + rect.w - 1) / MR_GAME_TILE_SIZE;
+  ty1 = (rect.y + rect.h - 1) / MR_GAME_TILE_SIZE;
+
+  if (tx0 < 0)
+    tx0 = 0;
+  if (ty0 < 0)
+    ty0 = 0;
+  if (tx1 >= MR_GAME_MAP_W)
+    tx1 = MR_GAME_MAP_W - 1;
+  if (ty1 >= MR_GAME_MAP_H)
+    ty1 = MR_GAME_MAP_H - 1;
+
+  for (ty = ty0; ty <= ty1; ++ty) {
+    for (tx = tx0; tx <= tx1; ++tx) {
+      if ((int)demo->tile_map[ty * MR_GAME_MAP_W + tx] == wanted_tile)
+        return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int mr_game_player_speed_for_move(const mr_game_demo_t *demo,
+                                         const gfx_actor_t *player, int dx,
+                                         int dy) {
+  gfx_rect_t current;
+  gfx_rect_t projected;
+
+  if (!demo || !player)
+    return MR_GAME_PLAYER_SPEED;
+
+  current = gfx_actor_world_rect(player);
+  projected = current;
+  projected.x += dx * MR_GAME_PLAYER_SPEED;
+  projected.y += dy * MR_GAME_PLAYER_SPEED;
+
+  if (mr_game_rect_overlaps_tile(demo, current, MR_GAME_TILE_SLOW) ||
+      mr_game_rect_overlaps_tile(demo, projected, MR_GAME_TILE_SLOW))
+    return MR_GAME_PLAYER_SLOW_SPEED;
+
+  return MR_GAME_PLAYER_SPEED;
 }
 
 static void mr_game_update_instances(mr_game_demo_t *demo) {
@@ -529,6 +590,7 @@ void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input) {
   gfx_rect_t after_rect;
   int dx;
   int dy;
+  int player_speed;
 
   if (!demo)
     return;
@@ -597,8 +659,8 @@ void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input) {
   if (dx || dy) {
     demo->last_dx = dx;
     demo->last_dy = dy;
-    gfx_actor_set_velocity(player, dx * MR_GAME_PLAYER_SPEED,
-                           dy * MR_GAME_PLAYER_SPEED);
+    player_speed = mr_game_player_speed_for_move(demo, player, dx, dy);
+    gfx_actor_set_velocity(player, dx * player_speed, dy * player_speed);
   } else {
     gfx_actor_set_velocity(player, 0, 0);
   }
