@@ -11,9 +11,9 @@ render FPS plus average FPS in the HUD.
 | `pipelined` | use DMA so frame N is sent while frame N+1 is rendered |
 
 ```bat
-mr build pico game
-mr build pico game-raw
-mr build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
+.\mr.bat build pico game
+.\mr.bat build pico game-raw
+.\mr.bat build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
 ```
 
 Raw game mode requires `MR_TILE_H=240`. It deliberately allocates no second
@@ -47,15 +47,15 @@ uses 512 sprites and 16-row tiles.
 ## Build examples
 
 ```bat
-mr build pico stress-raw
-mr build pico stress-visible
-mr build pico stress-lace sprites=1024 lace=4 sys=300000 spi=75000000
-mr build pico stress-render sprites=1024 serial=ON
-mr build pico stress-dirtyrect sprites=512 tile=16
-mr build pico all
+.\mr.bat build pico stress-raw
+.\mr.bat build pico stress-visible
+.\mr.bat build pico stress-lace sprites=1024 lace=4 sys=300000 spi=75000000
+.\mr.bat build pico stress-render sprites=1024 serial=ON
+.\mr.bat build pico stress-dirtyrect sprites=512 tile=16
+.\mr.bat build pico all
 ```
 
-`mr build pico all` is the command-line smoke test for the complete preset
+`.\mr.bat build pico all` is the command-line smoke test for the complete preset
 matrix. Every preset uses Ninja and the Pico ARM GCC toolchain. Incompatible
 Visual Studio/MSVC caches are removed automatically before reconfiguration.
 

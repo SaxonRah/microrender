@@ -3,7 +3,7 @@
 Run commands from the repository root through `mr.bat`.
 
 ```bat
-mr help
+.\mr.bat help
 ```
 
 All shipping frontends use a 320×240 RGB565 logical render target. Build-time
@@ -17,13 +17,13 @@ frontend arguments.
 Requires CMake and a C99 compiler.
 
 ```bat
-mr build tests
-mr test
-mr bench 200
+.\mr.bat build tests
+.\mr.bat test
+.\mr.bat bench 200
 ```
 
 The normal suite is RGB565 and contains unit, shared-game, and deterministic
-fuzz tests. The optional `mr test index8` remains useful as a legacy core-format
+fuzz tests. The optional `.\mr.bat test index8` remains useful as a legacy core-format
 compatibility check, but no shipping frontend uses it.
 
 ---
@@ -37,23 +37,23 @@ Install Raylib so CMake can find it, set `CMAKE_PREFIX_PATH`, or supply a source
 checkout:
 
 ```bat
-mr build raylib raylib=C:\src\raylib
+.\mr.bat build raylib raylib=C:\src\raylib
 ```
 
 Build defaults are configurable:
 
 ```bat
-mr build raylib demo=game mode=tiled tile=16 scale=3 fps=0 autoplay=OFF
-mr build raylib demo=stress mode=lace sprites=1024 lace=4 fps=0
+.\mr.bat build raylib demo=game mode=tiled tile=16 scale=3 fps=0 autoplay=OFF
+.\mr.bat build raylib demo=stress mode=lace sprites=1024 lace=4 fps=0
 ```
 
 Run-time options can override the compiled defaults:
 
 ```bat
-mr run raylib --demo game --mode raw --autoplay
-mr run raylib --demo game --mode tiled --tile 16 --scale 4
-mr run raylib --demo stress --mode dirtyrect --sprites 512
-mr run raylib --demo stress --mode lace --sprites 1024 --lace-block 4
+.\mr.bat run raylib --demo game --mode raw --autoplay
+.\mr.bat run raylib --demo game --mode tiled --tile 16 --scale 4
+.\mr.bat run raylib --demo stress --mode dirtyrect --sprites 512
+.\mr.bat run raylib --demo stress --mode lace --sprites 1024 --lace-block 4
 ```
 
 Modes:
@@ -75,7 +75,7 @@ Requires Open Watcom with `WATCOM` pointing to the install root.
 
 ```bat
 set WATCOM=C:\WATCOM
-mr build dos mode=both tile=16 vsync=0
+.\mr.bat build dos mode=both tile=16 vsync=0
 ```
 
 Outputs:
@@ -90,10 +90,10 @@ Outputs:
 Run them through DOSBox:
 
 ```bat
-mr run dos /auto
-mr run dosraw /auto
-mr run stress 512 2100
-mr run stressraw 512 2100
+.\mr.bat run dos /auto
+.\mr.bat run dosraw /auto
+.\mr.bat run stress 512 2100
+.\mr.bat run stressraw 512 2100
 ```
 
 The shared renderer remains 320×240 RGB565. Standard VGA is palettized, so the
@@ -104,9 +104,9 @@ small tile.
 Build settings:
 
 ```bat
-mr build dos mode=raw tile=16 vsync=0
-mr build dos mode=tiled tile=8 vsync=1
-mr build dos mode=both tile=16 vsync=0
+.\mr.bat build dos mode=raw tile=16 vsync=0
+.\mr.bat build dos mode=tiled tile=8 vsync=1
+.\mr.bat build dos mode=both tile=16 vsync=0
 ```
 
 `tile` changes the renderer working-strip height. `vsync` changes the default;
@@ -121,17 +121,17 @@ Requires Pico SDK, ARM GCC, CMake, and Ninja.
 Common presets:
 
 ```bat
-mr build pico game
-mr build pico game-raw
-mr build pico stress-visible
-mr build pico stress-raw
-mr build pico stress-lace
-mr build pico stress-render
-mr build pico stress-dirtyrect
-mr build pico all
+.\mr.bat build pico game
+.\mr.bat build pico game-raw
+.\mr.bat build pico stress-visible
+.\mr.bat build pico stress-raw
+.\mr.bat build pico stress-lace
+.\mr.bat build pico stress-render
+.\mr.bat build pico stress-dirtyrect
+.\mr.bat build pico all
 ```
 
-`mr build pico all` configures and builds every Pico preset. Pico command-line
+`.\mr.bat build pico all` configures and builds every Pico preset. Pico command-line
 builds always run from `microrender\`, use the `Ninja` generator and the Pico
 ARM GCC toolchain, and automatically remove a stale build directory previously
 configured with Visual Studio/MSVC. This makes the command safe to run from an
@@ -140,9 +140,9 @@ ordinary PowerShell, Developer PowerShell, or VS Code terminal.
 Override preset settings on the same command line:
 
 ```bat
-mr build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
-mr build pico stress-visible tile=240 sprites=1024 pipeline=ON serial=ON
-mr build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
+.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
+.\mr.bat build pico stress-visible tile=240 sprites=1024 pipeline=ON serial=ON
+.\mr.bat build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
 ```
 
 Friendly settings:
@@ -165,7 +165,7 @@ Friendly settings:
 Any cache variable beginning with `MR_` can also be passed through directly:
 
 ```bat
-mr build pico stress-dirtyrect MR_STRESS_DIRTY_MERGE_GAP=6 MR_STRESS_DIRTY_FULL_THRESHOLD_PCT=80
+.\mr.bat build pico stress-dirtyrect MR_STRESS_DIRTY_MERGE_GAP=6 MR_STRESS_DIRTY_FULL_THRESHOLD_PCT=80
 ```
 
 Raw Pico modes intentionally require `tile=240` and a full 240-row view. CMake
@@ -182,7 +182,7 @@ See [PICO_PRESENTATION_MODES.md](PICO_PRESENTATION_MODES.md).
 ## Assets
 
 ```bat
-mr build assets
+.\mr.bat build assets
 ```
 
 Regenerates the MRP package and embedded C data. CI builds the pack twice and
@@ -193,14 +193,14 @@ requires byte-identical output and a valid MRP header.
 ## Everything available locally
 
 ```bat
-mr build all
+.\mr.bat build all
 ```
 
 This always builds assets and host tests, then attempts DOS, Pico, and Raylib
 when their toolchains are available.
 
 ```bat
-mr clean
+.\mr.bat clean
 ```
 
 removes build output.

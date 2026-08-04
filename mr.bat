@@ -6,28 +6,28 @@ rem  This replaces the 37 individual .bat files the project used to carry, most
 rem  of which differed only in a couple of hardcoded arguments. Variants are now
 rem  arguments, not separate files.
 rem
-rem    mr build assets           regenerate GAME.MRP and the embedded C assets
-rem    mr build dos [mode=both]  16-bit DOS optimized + raw executables
-rem    mr build pico [preset|all] [key=value ...]
+rem    .\mr.bat build assets           regenerate GAME.MRP and the embedded C assets
+rem    .\mr.bat build dos [mode=both]  16-bit DOS optimized + raw executables
+rem    .\mr.bat build pico [preset|all] [key=value ...]
 rem                              RP2350 firmware; settings are command-line flags
-rem    mr build raylib [key=value ...]
+rem    .\mr.bat build raylib [key=value ...]
 rem                              desktop 320x240 RGB565 frontend
-rem    mr build pico <preset> vscode
+rem    .\mr.bat build pico <preset> vscode
 rem                              same, but configured into microrender\build so
 rem                              the VS Code Flash and Debug buttons use it
-rem    mr build tests            host test binaries
-rem    mr build all              everything the local toolchain supports
+rem    .\mr.bat build tests            host test binaries
+rem    .\mr.bat build all              everything the local toolchain supports
 rem
-rem    mr run dos [args]         optimized game demo in DOSBox
-rem    mr run dosraw [args]      raw draw-then-present baseline
-rem    mr run stress [n] [f]     optimized stress test in DOSBox
-rem    mr run stressraw [n] [f]  raw stress baseline
-rem    mr run raylib [args...]    desktop game/stress frontend
-rem    mr test [index8]          host unit + fuzz suite under ASan/UBSan
-rem    mr bench [frames]         host benchmark
+rem    .\mr.bat run dos [args]         optimized game demo in DOSBox
+rem    .\mr.bat run dosraw [args]      raw draw-then-present baseline
+rem    .\mr.bat run stress [n] [f]     optimized stress test in DOSBox
+rem    .\mr.bat run stressraw [n] [f]  raw stress baseline
+rem    .\mr.bat run raylib [args...]    desktop game/stress frontend
+rem    .\mr.bat test [index8]          host unit + fuzz suite under ASan/UBSan
+rem    .\mr.bat bench [frames]         host benchmark
 rem
-rem    mr clean                  remove all build output
-rem    mr help                   this text
+rem    .\mr.bat clean                  remove all build output
+rem    .\mr.bat help                   this text
 rem
 rem  Environment overrides:
 rem    WATCOM              Open Watcom install root
@@ -110,13 +110,13 @@ exit /b 1
 :do_help
 echo MicroRender build and run driver.
 echo.
-echo   mr build assets ^| dos [mode=raw/tiled/both] [tile=N] [vsync=0/1] ^| pico [preset] [settings] ^| raylib [settings] ^| tests ^| all
-echo   mr run dos ^| dosraw [args...]     optimized or raw game in DOSBox
-echo   mr run stress ^| stressraw [sprites] [frames]
-echo   mr run raylib [args...]            desktop frontend
-echo   mr test [index8]                  host suite under ASan/UBSan
-echo   mr bench [frames]                 host benchmark
-echo   mr clean
+echo   .\mr.bat build assets ^| dos [mode=raw/tiled/both] [tile=N] [vsync=0/1] ^| pico [preset] [settings] ^| raylib [settings] ^| tests ^| all
+echo   .\mr.bat run dos ^| dosraw [args...]     optimized or raw game in DOSBox
+echo   .\mr.bat run stress ^| stressraw [sprites] [frames]
+echo   .\mr.bat run raylib [args...]            desktop frontend
+echo   .\mr.bat test [index8]                  host suite under ASan/UBSan
+echo   .\mr.bat bench [frames]                 host benchmark
+echo   .\mr.bat clean
 echo.
 echo Pico presets: game, game-raw, stress-raw, stress-visible, stress-lace,
 echo               stress-render, stress-dirtyrect, all
@@ -128,7 +128,7 @@ echo   dos:    mode=raw/tiled/both tile=N vsync=0/1
 echo   raylib: demo=game/stress mode=raw/tiled/lace/dirtyrect tile=N
 echo           scale=N sprites=N fps=N autoplay=ON/OFF lace=N
 echo           raylib=C:\path\to\raylib
-echo   advanced: pass any MR_...=value CMake cache variable through mr build
+echo   advanced: pass any MR_...=value CMake cache variable through .\mr.bat build
 echo.
 echo See the header of mr.bat for environment overrides.
 exit /b 0
