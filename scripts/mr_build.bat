@@ -53,13 +53,37 @@ set "MR_DOS_MODE=both"
 shift /1
 :dos_opts
 if "%~1"=="" goto dos_opts_done
-for /f "tokens=1,* delims==" %%A in ("%~1") do (
-    if /i "%%A"=="tile" set "MR_DOS_TILE_H=%%B"
-    if /i "%%A"=="tile_h" set "MR_DOS_TILE_H=%%B"
-    if /i "%%A"=="vsync" set "MR_DOS_VSYNC=%%B"
-    if /i "%%A"=="mode" set "MR_DOS_MODE=%%B"
-    if /i "%%A"=="presentation" set "MR_DOS_MODE=%%B"
+rem CMD treats an unquoted equals sign as a batch-argument delimiter.
+rem Therefore both of these must work:
+rem   tile=16          arrives as %%1=tile, %%2=16
+rem   "tile=16"        arrives as one argument
+set "MR_OPT=%~1"
+set "MR_KEY=%~1"
+set "MR_VALUE=%~2"
+set "MR_OPT_ARGC=2"
+for /f "tokens=1,* delims==" %%A in ("!MR_OPT!") do (
+    if not "%%B"=="" (
+        set "MR_KEY=%%A"
+        set "MR_VALUE=%%B"
+        set "MR_OPT_ARGC=1"
+    )
 )
+if "!MR_VALUE!"=="" (
+    echo ERROR: DOS option "!MR_KEY!" has an empty value.
+    echo Use either !MR_KEY!=VALUE or "!MR_KEY!=VALUE".
+    exit /b 1
+)
+set "MR_OPT_HANDLED=0"
+if /i "!MR_KEY!"=="tile"         (set "MR_DOS_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="tile_h"       (set "MR_DOS_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="vsync"        (set "MR_DOS_VSYNC=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="mode"         (set "MR_DOS_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="presentation" (set "MR_DOS_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if "!MR_OPT_HANDLED!"=="0" (
+    echo ERROR: unknown DOS build option "!MR_KEY!".
+    exit /b 1
+)
+if "!MR_OPT_ARGC!"=="2" shift /1
 shift /1
 goto dos_opts
 :dos_opts_done
@@ -131,23 +155,47 @@ if "%~1"=="" goto pico_opts_done
 if /i "%~1"=="vscode" (
     set "PICO_VSCODE=1"
 ) else (
-    for /f "tokens=1,* delims==" %%A in ("%~1") do (
-        set "MR_KEY=%%A"
-        if /i "!MR_KEY:~0,3!"=="MR_" set "EXTRA_FLAGS=!EXTRA_FLAGS! -D%%A=%%B"
-        if /i "%%A"=="tile" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=%%B"
-        if /i "%%A"=="tile_h" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=%%B"
-        if /i "%%A"=="sprites" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_SPRITES=%%B"
-        if /i "%%A"=="sys" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_SYS_KHZ=%%B"
-        if /i "%%A"=="spi" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_LCD_SPI_BAUD=%%B"
-        if /i "%%A"=="pipeline" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_FRAME_PIPELINE=%%B"
-        if /i "%%A"=="mode" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_MODE=%%B"
-        if /i "%%A"=="presentation" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_GAME_PRESENTATION=%%B"
-        if /i "%%A"=="hud" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_HUD_MODE=%%B"
-        if /i "%%A"=="lace" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_LACE_BLOCK_H=%%B"
-        if /i "%%A"=="target" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_TARGET_FPS=%%B"
-        if /i "%%A"=="serial" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_SERIAL=%%B -DMR_PICO_GAME_SERIAL=%%B"
-        if /i "%%A"=="diag" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_DIAG=%%B"
+    rem CMD splits unquoted key=value into two batch parameters.  Accept both
+    rem the historical unquoted spelling and an explicitly quoted token.
+    set "MR_OPT=%~1"
+    set "MR_KEY=%~1"
+    set "MR_VALUE=%~2"
+    set "MR_OPT_ARGC=2"
+    for /f "tokens=1,* delims==" %%A in ("!MR_OPT!") do (
+        if not "%%B"=="" (
+            set "MR_KEY=%%A"
+            set "MR_VALUE=%%B"
+            set "MR_OPT_ARGC=1"
+        )
     )
+    if "!MR_VALUE!"=="" (
+        echo ERROR: Pico option "!MR_KEY!" has an empty value.
+        echo Use either !MR_KEY!=VALUE or "!MR_KEY!=VALUE".
+        exit /b 1
+    )
+    set "MR_OPT_HANDLED=0"
+    if /i "!MR_KEY:~0,3!"=="MR_" (
+        set "EXTRA_FLAGS=!EXTRA_FLAGS! -D!MR_KEY!=!MR_VALUE!"
+        set "MR_OPT_HANDLED=1"
+    )
+    if /i "!MR_KEY!"=="tile" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="tile_h" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="sprites" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_SPRITES=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="sys" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_SYS_KHZ=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="spi" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_LCD_SPI_BAUD=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="pipeline" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_FRAME_PIPELINE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="mode" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="presentation" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_GAME_PRESENTATION=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="hud" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_HUD_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="lace" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_LACE_BLOCK_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="target" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_TARGET_FPS=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="serial" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_SERIAL=!MR_VALUE! -DMR_PICO_GAME_SERIAL=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if /i "!MR_KEY!"=="diag" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_DIAG=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+    if "!MR_OPT_HANDLED!"=="0" (
+        echo ERROR: unknown Pico build option "!MR_KEY!".
+        exit /b 1
+    )
+    if "!MR_OPT_ARGC!"=="2" shift /1
 )
 shift /1
 goto pico_opts
@@ -264,23 +312,45 @@ set "RAYLIB_OVERRIDE=0"
 shift /1
 :ray_opts
 if "%~1"=="" goto ray_opts_done
-for /f "tokens=1,* delims==" %%A in ("%~1") do (
-    set "MR_KEY=%%A"
-    if /i "!MR_KEY:~0,3!"=="MR_" set "RAY_FLAGS=!RAY_FLAGS! -D%%A=%%B"
-    if /i "%%A"=="demo" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_DEMO=%%B"
-    if /i "%%A"=="mode" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_MODE=%%B"
-    if /i "%%A"=="tile" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=%%B"
-    if /i "%%A"=="tile_h" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=%%B"
-    if /i "%%A"=="scale" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SCALE=%%B"
-    if /i "%%A"=="sprites" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SPRITES=%%B"
-    if /i "%%A"=="fps" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_FPS=%%B"
-    if /i "%%A"=="autoplay" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_AUTOPLAY=%%B"
-    if /i "%%A"=="lace" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_LACE_BLOCK_H=%%B"
-    if /i "%%A"=="raylib" (
-        set "RAYLIB_OVERRIDE=1"
-        set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_PATH:PATH="%%B""
+rem Accept both unquoted key=value (split by CMD into two parameters) and
+rem a quoted "key=value" token.
+set "MR_OPT=%~1"
+set "MR_KEY=%~1"
+set "MR_VALUE=%~2"
+set "MR_OPT_ARGC=2"
+for /f "tokens=1,* delims==" %%A in ("!MR_OPT!") do (
+    if not "%%B"=="" (
+        set "MR_KEY=%%A"
+        set "MR_VALUE=%%B"
+        set "MR_OPT_ARGC=1"
     )
 )
+if "!MR_VALUE!"=="" (
+    echo ERROR: Raylib option "!MR_KEY!" has an empty value.
+    echo Use either !MR_KEY!=VALUE or "!MR_KEY!=VALUE".
+    exit /b 1
+)
+set "MR_OPT_HANDLED=0"
+if /i "!MR_KEY:~0,3!"=="MR_" (set "RAY_FLAGS=!RAY_FLAGS! -D!MR_KEY!=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="demo" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_DEMO=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="mode" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="tile" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="tile_h" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="scale" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SCALE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="sprites" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SPRITES=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="fps" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_FPS=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="autoplay" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_AUTOPLAY=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="lace" (set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_LACE_BLOCK_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
+if /i "!MR_KEY!"=="raylib" (
+    set "RAYLIB_OVERRIDE=1"
+    set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_PATH:PATH="!MR_VALUE!""
+    set "MR_OPT_HANDLED=1"
+)
+if "!MR_OPT_HANDLED!"=="0" (
+    echo ERROR: unknown Raylib build option "!MR_KEY!".
+    exit /b 1
+)
+if "!MR_OPT_ARGC!"=="2" shift /1
 shift /1
 goto ray_opts
 :ray_opts_done
