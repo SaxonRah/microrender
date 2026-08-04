@@ -1,6 +1,6 @@
 #include "mr_game_demo.h"
+#include "mr_strbuf.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #define MR_GAME_PLAYER_SPEED 3
@@ -704,15 +704,25 @@ void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input) {
 
 static void mr_game_draw_hud(mr_game_demo_t *demo, gfx_renderer_t *r) {
   char buf[80];
+  char *dst;
+  const char *end = buf + sizeof(buf) - 1;
 
   gfx_fill_rect(r, 0, 0, demo->screen_w, 28, GFX_RGB565(0, 26, 64));
   gfx_draw_text5x7(r, 6, 5, "MICRORENDER SHARED GAME DEMO", GFX_RGB565_YELLOW,
                    1);
 
-  sprintf(buf, "FPS=%lu.%lu AVG=%lu.%lu PICK=%lu/%d R=%lu",
-          demo->fps10 / 10ul, demo->fps10 % 10ul, demo->avg_fps10 / 10ul,
-          demo->avg_fps10 % 10ul, demo->pickups_collected, demo->pickup_count,
-          demo->restart_count);
+  dst = buf;
+  dst = mr_strbuf_str(dst, end, "FPS=");
+  dst = mr_strbuf_frac(dst, end, demo->fps10, 10ul);
+  dst = mr_strbuf_str(dst, end, " AVG=");
+  dst = mr_strbuf_frac(dst, end, demo->avg_fps10, 10ul);
+  dst = mr_strbuf_str(dst, end, " PICK=");
+  dst = mr_strbuf_u32(dst, end, demo->pickups_collected);
+  dst = mr_strbuf_char(dst, end, '/');
+  dst = mr_strbuf_u32(dst, end, (unsigned long)demo->pickup_count);
+  dst = mr_strbuf_str(dst, end, " R=");
+  dst = mr_strbuf_u32(dst, end, demo->restart_count);
+  *dst = '\0';
   gfx_draw_text5x7(r, 6, 17, buf, GFX_RGB565_WHITE, 1);
 
   if (demo->message_timer > 0 && demo->message[0]) {
@@ -725,10 +735,22 @@ static void mr_game_draw_hud(mr_game_demo_t *demo, gfx_renderer_t *r) {
   }
 
   if (demo->debug_overlay) {
-    sprintf(buf, "COL=%lu TRIG=%lu CAM=%d,%d P=%d,%d",
-            demo->collision_hits, demo->trigger_hits, demo->camera.x,
-            demo->camera.y, demo->actors[demo->player_index].world_x,
-            demo->actors[demo->player_index].world_y);
+    dst = buf;
+    dst = mr_strbuf_str(dst, end, "COL=");
+    dst = mr_strbuf_u32(dst, end, demo->collision_hits);
+    dst = mr_strbuf_str(dst, end, " TRIG=");
+    dst = mr_strbuf_u32(dst, end, demo->trigger_hits);
+    dst = mr_strbuf_str(dst, end, " CAM=");
+    dst = mr_strbuf_i32(dst, end, (long)demo->camera.x);
+    dst = mr_strbuf_char(dst, end, ',');
+    dst = mr_strbuf_i32(dst, end, (long)demo->camera.y);
+    dst = mr_strbuf_str(dst, end, " P=");
+    dst = mr_strbuf_i32(dst, end,
+                        (long)demo->actors[demo->player_index].world_x);
+    dst = mr_strbuf_char(dst, end, ',');
+    dst = mr_strbuf_i32(dst, end,
+                        (long)demo->actors[demo->player_index].world_y);
+    *dst = '\0';
     gfx_fill_rect(r, 0, 30, demo->screen_w, 12, GFX_RGB565(36, 0, 50));
     gfx_draw_text5x7(r, 6, 33, buf, GFX_RGB565_MAGENTA, 1);
   }
