@@ -5,7 +5,8 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-set(MR_RAYLIB_PATH "" CACHE PATH "Path to a raylib source checkout, used when find_package(raylib) is unavailable")
+set(MR_RAYLIB_PATH "" CACHE PATH "Optional override path to a raylib source checkout")
+set(MR_RAYLIB_SUBMODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/raylib")
 set(MR_RAYLIB_DEFAULT_DEMO "game" CACHE STRING "Default demo: game or stress")
 set_property(CACHE MR_RAYLIB_DEFAULT_DEMO PROPERTY STRINGS game stress)
 set(MR_RAYLIB_DEFAULT_MODE "tiled" CACHE STRING "Default presentation: raw, tiled, lace, dirtyrect")
@@ -38,7 +39,15 @@ elseif(MR_RAYLIB_DEFAULT_MODE STREQUAL "dirtyrect")
 endif()
 
 if(MR_RAYLIB_PATH)
+    message(STATUS "MicroRender Raylib: using override source ${MR_RAYLIB_PATH}")
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     add_subdirectory("${MR_RAYLIB_PATH}" "${CMAKE_BINARY_DIR}/raylib" EXCLUDE_FROM_ALL)
+elseif(EXISTS "${MR_RAYLIB_SUBMODULE_DIR}/CMakeLists.txt")
+    message(STATUS "MicroRender Raylib: using pinned submodule ${MR_RAYLIB_SUBMODULE_DIR}")
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${MR_RAYLIB_SUBMODULE_DIR}" "${CMAKE_BINARY_DIR}/raylib" EXCLUDE_FROM_ALL)
 else()
     find_package(raylib CONFIG QUIET)
 endif()
@@ -56,8 +65,9 @@ endif()
 
 if(NOT TARGET raylib)
     message(FATAL_ERROR
-        "raylib was not found. Install raylib, set CMAKE_PREFIX_PATH, or pass "
-        "-DMR_RAYLIB_PATH=C:/path/to/raylib")
+        "raylib was not found. Initialize the pinned submodule with: "
+        "git submodule update --init --recursive. "
+        "An installed package or -DMR_RAYLIB_PATH=C:/path/to/raylib can still be used as an override.")
 endif()
 
 set(MR_SHARED_SRC "${CMAKE_CURRENT_LIST_DIR}/../shared/src")

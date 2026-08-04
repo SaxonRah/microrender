@@ -232,8 +232,14 @@ findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%PICO_CHECK_DIR%\CMakeCache.txt"
 if errorlevel 1 set "PICO_CACHE_BAD=1"
 findstr /I /C:"arm-none-eabi-gcc" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
 if errorlevel 1 set "PICO_CACHE_BAD=1"
+set "PICO_EXPECT_SOURCE=%PICO_SOURCE:\=/%"
+set "PICO_EXPECT_BUILD=%PICO_CHECK_DIR:\=/%"
+findstr /L /I /X /C:"CMAKE_HOME_DIRECTORY:INTERNAL=!PICO_EXPECT_SOURCE!" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
+if errorlevel 1 set "PICO_CACHE_BAD=1"
+findstr /L /I /X /C:"CMAKE_CACHEFILE_DIR:INTERNAL=!PICO_EXPECT_BUILD!" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
+if errorlevel 1 set "PICO_CACHE_BAD=1"
 if "%PICO_CACHE_BAD%"=="1" (
-    echo [pico] removing stale non-Ninja/non-ARM build directory:
+    echo [pico] removing stale or incompatible Pico build directory:
     echo        %PICO_CHECK_DIR%
     rmdir /S /Q "%PICO_CHECK_DIR%"
     if exist "%PICO_CHECK_DIR%" (
@@ -254,6 +260,7 @@ rem ---------------------------------------------------------------------------
 call "%MR_ROOT%\scripts\mr_tools.bat" cmake
 if errorlevel 1 exit /b 1
 set "RAY_FLAGS=-DCMAKE_BUILD_TYPE=Release"
+set "RAYLIB_OVERRIDE=0"
 shift /1
 :ray_opts
 if "%~1"=="" goto ray_opts_done
@@ -269,17 +276,62 @@ for /f "tokens=1,* delims==" %%A in ("%~1") do (
     if /i "%%A"=="fps" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_FPS=%%B"
     if /i "%%A"=="autoplay" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_AUTOPLAY=%%B"
     if /i "%%A"=="lace" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_LACE_BLOCK_H=%%B"
-    if /i "%%A"=="raylib" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_PATH:PATH="%%B""
+    if /i "%%A"=="raylib" (
+        set "RAYLIB_OVERRIDE=1"
+        set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_PATH:PATH="%%B""
+    )
 )
 shift /1
 goto ray_opts
 :ray_opts_done
+if "%RAYLIB_OVERRIDE%"=="0" (
+    call :raylib_ensure_submodule
+    if errorlevel 1 exit /b 1
+)
 echo [raylib] configuring 320x240 RGB565 host frontend ...
 cmake -S "%MR_ROOT%\microrender_raylib" -B "%MR_ROOT%\build\raylib" %RAY_FLAGS%
 if errorlevel 1 exit /b 1
 cmake --build "%MR_ROOT%\build\raylib" --config Release --parallel
 if errorlevel 1 exit /b 1
 echo [raylib] ok
+exit /b 0
+
+:raylib_ensure_submodule
+set "RAYLIB_SUBMODULE=%MR_ROOT%\third_party\raylib"
+if exist "%RAYLIB_SUBMODULE%\CMakeLists.txt" exit /b 0
+
+echo [raylib] third_party\raylib is not initialized; cloning pinned submodule ...
+where git >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: Git is required to initialize the Raylib submodule.
+    echo Install Git for Windows, then run:
+    echo   git submodule update --init --recursive
+    exit /b 1
+)
+git -C "%MR_ROOT%" rev-parse --is-inside-work-tree >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: this source tree is not a Git checkout, so the Raylib submodule cannot be initialized.
+    echo Clone with:
+    echo   git clone --recurse-submodules https://github.com/SaxonRah/microrender.git
+    exit /b 1
+)
+git -C "%MR_ROOT%" submodule update --init --recursive --depth 1 -- third_party/raylib
+if errorlevel 1 (
+    echo [raylib] shallow submodule update failed; retrying full pinned checkout ...
+    git -C "%MR_ROOT%" submodule update --init --recursive -- third_party/raylib
+)
+if errorlevel 1 (
+    echo ERROR: could not initialize third_party\raylib.
+    echo Retry manually with:
+    echo   git submodule sync --recursive
+    echo   git submodule update --init --recursive
+    exit /b 1
+)
+if not exist "%RAYLIB_SUBMODULE%\CMakeLists.txt" (
+    echo ERROR: Raylib submodule initialized without CMakeLists.txt.
+    exit /b 1
+)
+echo [raylib] submodule ready
 exit /b 0
 
 rem ---------------------------------------------------------------------------
@@ -309,22 +361,46 @@ exit /b 0
 
 rem ---------------------------------------------------------------------------
 :b_all
+set "MR_ALL_FAILED=0"
 call "%MR_ROOT%\scripts\mr_build.bat" assets
 if errorlevel 1 exit /b 1
+
 call "%MR_ROOT%\scripts\mr_build.bat" tests
-if errorlevel 1 echo [all] host tests skipped or failed - continuing
+if errorlevel 1 (
+    echo [all] host tests failed - continuing with remaining targets
+    set "MR_ALL_FAILED=1"
+)
+
 if not "%WATCOM%"=="" (
     call "%MR_ROOT%\scripts\mr_build.bat" dos
-    if errorlevel 1 echo [all] DOS build failed
+    if errorlevel 1 (
+        echo [all] DOS build failed
+        set "MR_ALL_FAILED=1"
+    )
 ) else (
     echo [all] WATCOM not set - skipping DOS target
 )
+
 cmake --version >nul 2>nul
-if not errorlevel 1 (
+if errorlevel 1 (
+    echo [all] CMake not available - Pico and Raylib were not built
+    set "MR_ALL_FAILED=1"
+) else (
     call "%MR_ROOT%\scripts\mr_build.bat" pico all
-    if errorlevel 1 echo [all] one or more Pico builds failed or SDK not present
+    if errorlevel 1 (
+        echo [all] one or more Pico builds failed or SDK not present
+        set "MR_ALL_FAILED=1"
+    )
     call "%MR_ROOT%\scripts\mr_build.bat" raylib
-    if errorlevel 1 echo [all] Raylib build skipped - install raylib or pass raylib=PATH
+    if errorlevel 1 (
+        echo [all] Raylib build failed
+        set "MR_ALL_FAILED=1"
+    )
 )
-echo [all] done
+
+if "%MR_ALL_FAILED%"=="1" (
+    echo [all] completed with one or more failures
+    exit /b 1
+)
+echo [all] all available targets built successfully
 exit /b 0
