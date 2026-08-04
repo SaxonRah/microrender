@@ -5,15 +5,13 @@
 
 /* Pixel-format selection.
 
-   Default: RGB565, used by RP2350 SPI LCDs and other 16-bit-color targets.
+   Default and shipping format: RGB565. Pico, DOS, Raylib, and normal host
+   tests all use the same 320x240 RGB565 logical renderer. DOS converts to its
+   physical VGA palette only in the presentation callback.
 
-   DOS build: define GFX_COLOR_INDEX8=1 to make gfx_color_t an 8-bit palette
-   index. The renderer core stays the same; only the pixel type changes.
-
-   For INDEX8, GFX_RGB565(r,g,b) intentionally maps to an RGB332 palette index:
-       rrrgggbb
-   This gives DOS mode 13h a native 8-bit path while keeping most
-   renderer/demo code source-compatible with RGB565 builds.
+   Define GFX_COLOR_INDEX8=1 only for the optional legacy host compatibility
+   test. The renderer core stays source-compatible while gfx_color_t becomes an
+   8-bit RGB332 palette index.
 */
 
 #define GFX_COLOR_FORMAT_RGB565 1

@@ -1,13 +1,35 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "game",
-      "displayName": "Pico 2: game demo",
+      "displayName": "Pico 2: game demo, DMA-pipelined",
       "description": "Replaces set_pico_game_build.py. Configuration lives here, not in rewritten source.",
       "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "MR_APP": "GAME", "MR_TILE_H": "240" }
+      "cacheVariables": {
+        "MR_APP": "GAME",
+        "MR_TILE_H": "240",
+        "MR_GAME_PRESENTATION": "pipelined",
+        "MR_SCREEN_W": "320",
+        "MR_SCREEN_H": "240"
+      },
+      "generator": "Ninja"
+    },
+    {
+      "name": "game-raw",
+      "inherits": "game",
+      "displayName": "Pico 2: game demo, raw serialized baseline",
+      "binaryDir": "${sourceDir}/build-game-raw",
+      "cacheVariables": {
+        "MR_GAME_PRESENTATION": "raw",
+        "MR_PICO_FRAME_PIPELINE": "OFF",
+        "MR_TILE_H": "240"
+      }
     },
     {
       "name": "stress-visible",
@@ -17,6 +39,18 @@
       "cacheVariables": {
         "MR_APP": "STRESS",
         "MR_STRESS_MODE": "visible",
+        "MR_STRESS_SPRITES": "512"
+      }
+    },
+    {
+      "name": "stress-raw",
+      "inherits": "stress-visible",
+      "displayName": "Pico 2: stress test, raw clear/draw/send loop",
+      "binaryDir": "${sourceDir}/build-stress-raw",
+      "cacheVariables": {
+        "MR_STRESS_MODE": "raw",
+        "MR_PICO_FRAME_PIPELINE": "OFF",
+        "MR_TILE_H": "240",
         "MR_STRESS_SPRITES": "512"
       }
     },
@@ -56,10 +90,33 @@
     }
   ],
   "buildPresets": [
-    { "name": "game",             "configurePreset": "game" },
-    { "name": "stress-visible",   "configurePreset": "stress-visible" },
-    { "name": "stress-lace",      "configurePreset": "stress-lace" },
-    { "name": "stress-render",    "configurePreset": "stress-render" },
-    { "name": "stress-dirtyrect", "configurePreset": "stress-dirtyrect" }
+    {
+      "name": "game",
+      "configurePreset": "game"
+    },
+    {
+      "name": "game-raw",
+      "configurePreset": "game-raw"
+    },
+    {
+      "name": "stress-visible",
+      "configurePreset": "stress-visible"
+    },
+    {
+      "name": "stress-raw",
+      "configurePreset": "stress-raw"
+    },
+    {
+      "name": "stress-lace",
+      "configurePreset": "stress-lace"
+    },
+    {
+      "name": "stress-render",
+      "configurePreset": "stress-render"
+    },
+    {
+      "name": "stress-dirtyrect",
+      "configurePreset": "stress-dirtyrect"
+    }
   ]
 }

@@ -16,3 +16,9 @@ microrender_dos/dosroot/GAME.MRP
 *.bak
 *.avi
 /build
+/microrender/build-game-raw
+/microrender/build-stress-dirtyrect
+/microrender/build-stress-lace
+/microrender/build-stress-raw
+/microrender/build-stress-render
+/microrender/build-stress-visible

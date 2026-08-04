@@ -7,15 +7,32 @@ set "TARGET=%~1"
 if "%TARGET%"=="" set "TARGET=dos16"
 if /I "%TARGET%"=="clean" goto clean
 if /I "%TARGET%"=="rebuild" (
-  call "%~f0" clean
-  if errorlevel 1 goto fail
-  set "TARGET=%~2"
-  if "%TARGET%"=="" set "TARGET=dos16"
+    call "%~f0" clean
+    if errorlevel 1 goto fail
+    if "%~2"=="" (
+        call "%~f0" dos16 tiled
+    ) else (
+        call "%~f0" dos16 "%~2"
+    )
+    exit /b %ERRORLEVEL%
 )
 if /I not "%TARGET%"=="dos16" if /I not "%TARGET%"=="dos" (
   echo ERROR: unknown target "%TARGET%"
-  echo Use: dos16, dos, clean, rebuild [dos16]
+  echo Use: dos16 [raw|tiled], dos [raw|tiled], clean, rebuild [raw|tiled]
   exit /b 1
+)
+
+set "MODE=%~2"
+if "%MODE%"=="" set "MODE=tiled"
+if /I "%MODE%"=="raw" (
+    set "PRESENT_ID=0"
+    set "MODE_TAG=raw"
+) else if /I "%MODE%"=="tiled" (
+    set "PRESENT_ID=1"
+    set "MODE_TAG=tiled"
+) else (
+    echo ERROR: presentation mode must be raw or tiled, got "%MODE%"
+    exit /b 1
 )
 
 call :check_watcom
@@ -23,19 +40,22 @@ if errorlevel 1 goto fail
 call :make_dirs
 if errorlevel 1 goto fail
 
-set "OBJDIR=build\obj\stress_dos16"
-set "ERRDIR=build\err\stress_dos16"
+set "OBJDIR=build\obj\stress_dos16_%MODE_TAG%"
+set "ERRDIR=build\err\stress_dos16_%MODE_TAG%"
 if not exist "%OBJDIR%" mkdir "%OBJDIR%"
 if not exist "%ERRDIR%" mkdir "%ERRDIR%"
-set "EXE=dist\mstress.exe"
+if /I "%MODE_TAG%"=="raw" (set "EXE=dist\msraw.exe") else (set "EXE=dist\mstress.exe")
 
-rem DOS stress test is native VGA INDEX8.
+rem DOS stress test uses the same 320x240 RGB565 logical target.
 rem This mirrors the working build_watcom.bat setup but adds mr_stress_test.c
 rem and links dos\dos_stress_app.c as the entry program.
-set "CFLAGS=-q -bt=dos -ml -2 -ox -s -w4 -dGFX_FIXED_NO_INT64 -dGFX_COLOR_INDEX8=1 -dGFX_ENABLE_TRIANGLES=1 -dMR_STRESS_MAX_SPRITES=1024 -i=..\shared\src -i=dos"
+set "CFLAGS=-q -bt=dos -ml -2 -ox -s -w4 -dGFX_FIXED_NO_INT64 -dGFX_COLOR_INDEX8=0 -dGFX_ENABLE_TRIANGLES=1 -dMR_STRESS_MAX_SPRITES=1024 -i=..\shared\src -i=dos"
+if "%MR_DOS_TILE_H%"=="" set "MR_DOS_TILE_H=16"
+if "%MR_DOS_VSYNC%"=="" set "MR_DOS_VSYNC=0"
+set "CFLAGS=%CFLAGS% -dMR_DOS_TILE_H=%MR_DOS_TILE_H% -dMR_DOS_VSYNC=%MR_DOS_VSYNC% -dMR_DOS_PRESENT_MODE=%PRESENT_ID%"
 set "LFLAGS=-q -bt=dos -ml"
 
-echo Building DOS MicroRender RLE/collision stress target from ..\shared\src...
+echo Building DOS MicroRender RLE/collision stress target [%MODE_TAG%] from ..\shared\src...
 echo WATCOM: %WATCOM%
 echo Compiler: %OW_WCC%
 echo Linker: %OW_WCL%
@@ -49,7 +69,9 @@ if errorlevel 1 goto fail
 call :compile ..\shared\src\gfx_engine.c "%OBJDIR%\gfx_engine.obj" "%ERRDIR%\gfx_engine.err"
 if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_stress_test.c "%OBJDIR%\mr_stress_test.obj" "%ERRDIR%\mr_stress_test.err"
+if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_strbuf.c "%OBJDIR%\mr_strbuf.obj" "%ERRDIR%\mr_strbuf.err"
+if errorlevel 1 goto fail
 call :compile dos\dos_vga.c "%OBJDIR%\dos_vga.obj" "%ERRDIR%\dos_vga.err"
 if errorlevel 1 goto fail
 call :compile dos\dos_stress_app.c "%OBJDIR%\dos_stress_app.obj" "%ERRDIR%\dos_stress_app.err"
@@ -123,9 +145,12 @@ exit /b 0
 :clean
 cd /d "%~dp0"
 echo Cleaning MicroRender DOS stress build output...
-if exist build\obj\stress_dos16 rmdir /s /q build\obj\stress_dos16
-if exist build\err\stress_dos16 rmdir /s /q build\err\stress_dos16
+if exist build\obj\stress_dos16_tiled rmdir /s /q build\obj\stress_dos16_tiled
+if exist build\obj\stress_dos16_raw rmdir /s /q build\obj\stress_dos16_raw
+if exist build\err\stress_dos16_tiled rmdir /s /q build\err\stress_dos16_tiled
+if exist build\err\stress_dos16_raw rmdir /s /q build\err\stress_dos16_raw
 if exist dist\mstress.exe del /q dist\mstress.exe
+if exist dist\msraw.exe del /q dist\msraw.exe
 echo Clean OK.
 goto done
 

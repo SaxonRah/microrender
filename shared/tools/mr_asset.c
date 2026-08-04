@@ -1,9 +1,12 @@
 /*
    mr_asset - MicroRender indexed asset converter.
 
-   Host-side C99 tool.  Converts 8-bit indexed BMP or PCX files into C source
-   arrays usable by the DOS INDEX8 renderer.  It can emit raw sprites or RLE
-   masked sprites where one palette index is treated as transparent.
+   Host-side C99 legacy source-asset tool. Converts 8-bit indexed BMP or PCX
+   files into C arrays for the optional indexed-data pipeline. Shipping Pico,
+   DOS, and Raylib frontends render RGB565; indexed source art must be mapped
+   through its palette before it becomes a shipping gfx_color_t sprite. The tool
+   can emit raw indices or RLE masked indices where one palette index is treated
+   as transparent.
 
    Usage:
      mr_asset input.bmp output_name [--raw] [--rle] [--key N]

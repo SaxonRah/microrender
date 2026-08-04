@@ -238,6 +238,61 @@ static void mr_game_set_message(mr_game_demo_t *demo, const char *msg,
   demo->message_timer = ticks;
 }
 
+
+static void mr_game_spawn_particle(mr_game_demo_t *demo, int world_x,
+                                   int world_y, int vx8, int vy8, int life,
+                                   gfx_color_t color) {
+  mr_game_particle_t *p;
+
+  if (!demo || life <= 0)
+    return;
+  p = &demo->particles[demo->particle_cursor];
+  demo->particle_cursor = (demo->particle_cursor + 1) % MR_GAME_MAX_PARTICLES;
+  p->x8 = world_x * 8;
+  p->y8 = world_y * 8;
+  p->vx8 = vx8;
+  p->vy8 = vy8;
+  p->life = life;
+  p->color = color;
+}
+
+static void mr_game_spawn_burst(mr_game_demo_t *demo, int world_x, int world_y,
+                                gfx_color_t color, int count) {
+  static const signed char velocity[16][2] = {
+      {-12, -20}, {-5, -23}, {5, -23},  {12, -20}, {18, -10}, {20, 0},
+      {18, 10},   {12, 17},  {5, 20},   {-5, 20},  {-12, 17}, {-18, 10},
+      {-20, 0},   {-18, -10},{0, -27},  {0, 23}};
+  int i;
+
+  if (count > 16)
+    count = 16;
+  for (i = 0; i < count; ++i) {
+    mr_game_spawn_particle(demo, world_x, world_y, velocity[i][0],
+                           velocity[i][1], 18 + (i & 7), color);
+  }
+}
+
+static void mr_game_update_particles(mr_game_demo_t *demo) {
+  int i;
+  for (i = 0; i < MR_GAME_MAX_PARTICLES; ++i) {
+    mr_game_particle_t *p = &demo->particles[i];
+    if (p->life <= 0)
+      continue;
+    p->x8 += p->vx8;
+    p->y8 += p->vy8;
+    p->vy8 += 2;
+    --p->life;
+  }
+}
+
+void mr_game_demo_set_fps10(mr_game_demo_t *demo, unsigned long fps10,
+                            unsigned long avg_fps10) {
+  if (!demo)
+    return;
+  demo->fps10 = fps10;
+  demo->avg_fps10 = avg_fps10;
+}
+
 static void mr_game_make_world_objects(mr_game_demo_t *demo) {
   int i;
   static const int enemy_pos[5][2] = {
@@ -251,9 +306,9 @@ static void mr_game_make_world_objects(mr_game_demo_t *demo) {
 
   gfx_actor_init(&demo->actors[0], &demo->player_sprites[0], 48, 48, 10, 1);
   gfx_actor_set_anim(&demo->actors[0], &demo->player_anim);
-  gfx_actor_set_bounds(&demo->actors[0], 0, 0,
-                       MR_GAME_MAP_W * MR_GAME_TILE_SIZE - 16,
-                       MR_GAME_MAP_H * MR_GAME_TILE_SIZE - 16);
+  /* Bounds are expressed as collider extents, not sprite-origin maxima. */
+  gfx_actor_set_bounds(&demo->actors[0], 0, 0, MR_GAME_WORLD_W,
+                       MR_GAME_WORLD_H);
   gfx_actor_set_collider(&demo->actors[0], 3, 8, 10, 8);
   demo->actors[0].flags = (uint8_t)(demo->actors[0].flags | GFX_ACTOR_ACTIVE |
                                     GFX_ACTOR_VISIBLE | GFX_ACTOR_SOLID);
@@ -263,8 +318,7 @@ static void mr_game_make_world_objects(mr_game_demo_t *demo) {
     gfx_actor_init(&demo->actors[demo->actor_count], &demo->enemy_sprite,
                    enemy_pos[i][0], enemy_pos[i][1], 8, 1);
     gfx_actor_set_bounds(&demo->actors[demo->actor_count], 0, 0,
-                         MR_GAME_MAP_W * MR_GAME_TILE_SIZE - 16,
-                         MR_GAME_MAP_H * MR_GAME_TILE_SIZE - 16);
+                         MR_GAME_WORLD_W, MR_GAME_WORLD_H);
     gfx_actor_set_collider(&demo->actors[demo->actor_count], 2, 6, 12, 10);
     demo->actors[demo->actor_count].flags =
         (uint8_t)(demo->actors[demo->actor_count].flags | GFX_ACTOR_ACTIVE |
@@ -338,9 +392,8 @@ void mr_game_demo_init(mr_game_demo_t *demo, int screen_w, int screen_h) {
   mr_game_make_sprites(demo);
   mr_game_make_world_objects(demo);
 
-  gfx_camera_init(&demo->camera, screen_w, screen_h,
-                  MR_GAME_MAP_W * MR_GAME_TILE_SIZE,
-                  MR_GAME_MAP_H * MR_GAME_TILE_SIZE);
+  gfx_camera_init(&demo->camera, screen_w, screen_h, MR_GAME_WORLD_W,
+                  MR_GAME_WORLD_H);
   gfx_camera_set_deadzone(&demo->camera, (screen_w - MR_GAME_DEADZONE_W) / 2,
                           (screen_h - MR_GAME_DEADZONE_H) / 2,
                           MR_GAME_DEADZONE_W, MR_GAME_DEADZONE_H);
@@ -352,6 +405,63 @@ void mr_game_demo_init(mr_game_demo_t *demo, int screen_w, int screen_h) {
   mr_game_set_message(demo, "PRESS ENTER / AUTORUN STARTS",
                       MR_GAME_TICK_HZ * 2);
   mr_game_update_instances(demo);
+}
+
+
+void mr_game_demo_restart(mr_game_demo_t *demo) {
+  unsigned long restarts;
+  unsigned long fps10;
+  unsigned long avg_fps10;
+  int keep_debug;
+
+  if (!demo)
+    return;
+
+  restarts = demo->restart_count + 1ul;
+  fps10 = demo->fps10;
+  avg_fps10 = demo->avg_fps10;
+  keep_debug = demo->debug_overlay;
+
+  mr_game_make_world_objects(demo);
+  memset(demo->particles, 0, sizeof(demo->particles));
+  demo->particle_cursor = 0;
+  demo->frame = 0ul;
+  demo->pickups_collected = 0ul;
+  demo->trigger_hits = 0ul;
+  demo->camera.x = 0;
+  demo->camera.y = 0;
+  demo->camera.shake_x = 0;
+  demo->camera.shake_y = 0;
+  demo->camera.shake_ticks = 0;
+  demo->restart_count = restarts;
+  demo->fps10 = fps10;
+  demo->avg_fps10 = avg_fps10;
+  demo->debug_overlay = keep_debug;
+  demo->paused = 0;
+  demo->title_screen = 0;
+  demo->force_full_dirty = 1;
+  demo->last_dx = 1;
+  demo->last_dy = 0;
+  demo->last_event = MR_GAME_EVENT_ENEMY_HIT;
+  mr_game_set_message(demo, "ENEMY HIT - RESTART", MR_GAME_TICK_HZ * 2);
+  mr_game_spawn_burst(demo, demo->actors[demo->player_index].world_x + 8,
+                      demo->actors[demo->player_index].world_y + 8,
+                      GFX_RGB565_RED, 16);
+  mr_game_update_instances(demo);
+}
+
+static int mr_game_player_hits_enemy(const mr_game_demo_t *demo,
+                                     gfx_rect_t player_rect) {
+  int i;
+  if (!demo)
+    return 0;
+  for (i = 1; i < demo->actor_count; ++i) {
+    if ((demo->actors[i].flags & GFX_ACTOR_ACTIVE) != 0u &&
+        mr_game_rects_overlap(player_rect,
+                              gfx_actor_world_rect(&demo->actors[i])))
+      return 1;
+  }
+  return 0;
 }
 
 static void mr_game_handle_triggers(mr_game_demo_t *demo,
@@ -384,6 +494,8 @@ static void mr_game_handle_pickups(mr_game_demo_t *demo,
         ++demo->pickups_collected;
         demo->last_event = MR_GAME_EVENT_PICKUP;
         mr_game_set_message(demo, "PICKUP", MR_GAME_TICK_HZ);
+        mr_game_spawn_burst(demo, demo->pickups[i].world_x + 6,
+                            demo->pickups[i].world_y + 6, GFX_RGB565_YELLOW, 10);
         gfx_camera_apply_shake(&demo->camera, 1, 1, 6);
       }
     }
@@ -406,7 +518,7 @@ static void mr_game_update_enemies(mr_game_demo_t *demo) {
       gfx_actor_move_collide(&demo->actors[i], &demo->collision, -speed, 0);
     else
       gfx_actor_move_collide(&demo->actors[i], &demo->collision, 0, -speed);
-    gfx_actor_update(&demo->actors[i]);
+    gfx_actor_update_animation(&demo->actors[i]);
   }
 }
 
@@ -503,12 +615,20 @@ void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input) {
   }
 
   gfx_actor_update_animation(player);
-  gfx_actor_update(player);
   mr_game_update_enemies(demo);
 
   after_rect = gfx_actor_world_rect(player);
+  if (mr_game_player_hits_enemy(demo, after_rect)) {
+    ++demo->collision_hits;
+    mr_game_demo_restart(demo);
+    mr_game_update_particles(demo);
+    ++demo->frame;
+    return;
+  }
+
   mr_game_handle_pickups(demo, after_rect);
   mr_game_handle_triggers(demo, after_rect);
+  mr_game_update_particles(demo);
 
   gfx_camera_follow_rect(&demo->camera, after_rect);
   gfx_camera_update_shake(&demo->camera);
@@ -521,15 +641,16 @@ void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input) {
 }
 
 static void mr_game_draw_hud(mr_game_demo_t *demo, gfx_renderer_t *r) {
-  char buf[48];
+  char buf[80];
 
   gfx_fill_rect(r, 0, 0, demo->screen_w, 28, GFX_RGB565(0, 26, 64));
   gfx_draw_text5x7(r, 6, 5, "MICRORENDER SHARED GAME DEMO", GFX_RGB565_YELLOW,
                    1);
 
-  sprintf(buf, "F=%lu  PICKUPS=%lu/%d  CAM=%d,%d", demo->frame,
-          demo->pickups_collected, demo->pickup_count, demo->camera.x,
-          demo->camera.y);
+  sprintf(buf, "FPS=%lu.%lu AVG=%lu.%lu PICK=%lu/%d R=%lu",
+          demo->fps10 / 10ul, demo->fps10 % 10ul, demo->avg_fps10 / 10ul,
+          demo->avg_fps10 % 10ul, demo->pickups_collected, demo->pickup_count,
+          demo->restart_count);
   gfx_draw_text5x7(r, 6, 17, buf, GFX_RGB565_WHITE, 1);
 
   if (demo->message_timer > 0 && demo->message[0]) {
@@ -542,8 +663,10 @@ static void mr_game_draw_hud(mr_game_demo_t *demo, gfx_renderer_t *r) {
   }
 
   if (demo->debug_overlay) {
-    sprintf(buf, "COL=%lu TRIG=%lu ACT=%d INST=%d", demo->collision_hits,
-            demo->trigger_hits, demo->actor_count, demo->instance_count);
+    sprintf(buf, "COL=%lu TRIG=%lu CAM=%d,%d P=%d,%d",
+            demo->collision_hits, demo->trigger_hits, demo->camera.x,
+            demo->camera.y, demo->actors[demo->player_index].world_x,
+            demo->actors[demo->player_index].world_y);
     gfx_fill_rect(r, 0, 30, demo->screen_w, 12, GFX_RGB565(36, 0, 50));
     gfx_draw_text5x7(r, 6, 33, buf, GFX_RGB565_MAGENTA, 1);
   }
@@ -566,6 +689,22 @@ void mr_game_demo_render(mr_game_demo_t *demo, gfx_renderer_t *renderer) {
     if (demo->instances[i].visible && demo->instances[i].sprite) {
       gfx_blit(renderer, demo->instances[i].sprite, demo->instances[i].x,
                demo->instances[i].y);
+    }
+  }
+
+
+  for (i = 0; i < MR_GAME_MAX_PARTICLES; ++i) {
+    mr_game_particle_t *p = &demo->particles[i];
+    int px;
+    int py;
+    if (p->life <= 0)
+      continue;
+    px = p->x8 / 8 - demo->camera.x;
+    py = p->y8 / 8 - demo->camera.y;
+    if (px >= 0 && py >= 0 && px < demo->screen_w && py < demo->screen_h) {
+      gfx_draw_pixel(renderer, px, py, p->color);
+      if (p->life > 12 && px + 1 < demo->screen_w)
+        gfx_draw_pixel(renderer, px + 1, py, p->color);
     }
   }
 

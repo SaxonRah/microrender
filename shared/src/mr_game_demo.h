@@ -10,19 +10,23 @@ extern "C" {
 #endif
 
 #define MR_GAME_SCREEN_W_DEFAULT 320
-#define MR_GAME_SCREEN_H_DEFAULT 200
+#define MR_GAME_SCREEN_H_DEFAULT 240
 #define MR_GAME_TILE_SIZE 16
 #define MR_GAME_TILE_COUNT 8
 #define MR_GAME_MAP_W 64
 #define MR_GAME_MAP_H 64
+#define MR_GAME_WORLD_W (MR_GAME_MAP_W * MR_GAME_TILE_SIZE)
+#define MR_GAME_WORLD_H (MR_GAME_MAP_H * MR_GAME_TILE_SIZE)
 #define MR_GAME_MAX_ACTORS 6
 #define MR_GAME_MAX_PICKUPS 10
 #define MR_GAME_MAX_INSTANCES (MR_GAME_MAX_ACTORS + MR_GAME_MAX_PICKUPS)
+#define MR_GAME_MAX_PARTICLES 48
 #define MR_GAME_TICK_HZ 70
 #define MR_GAME_EVENT_NONE 0
 #define MR_GAME_EVENT_PICKUP 1
 #define MR_GAME_EVENT_MESSAGE 2
 #define MR_GAME_EVENT_BLOCKED 3
+#define MR_GAME_EVENT_ENEMY_HIT 4
 
 typedef struct mr_game_pickup {
   int world_x;
@@ -38,6 +42,17 @@ typedef struct mr_game_trigger {
   const char *message;
 } mr_game_trigger_t;
 
+typedef struct mr_game_particle {
+  /* Positions and velocities use eighth-pixel units so the implementation
+     remains deterministic and floating-point-free on DOS and RP2350. */
+  int x8;
+  int y8;
+  int vx8;
+  int vy8;
+  int life;
+  gfx_color_t color;
+} mr_game_particle_t;
+
 typedef struct mr_game_demo {
   int screen_w;
   int screen_h;
@@ -46,6 +61,9 @@ typedef struct mr_game_demo {
   unsigned long collision_hits;
   unsigned long pickups_collected;
   unsigned long trigger_hits;
+  unsigned long restart_count;
+  unsigned long fps10;
+  unsigned long avg_fps10;
 
   gfx_camera_t camera;
   gfx_collision_map_t collision;
@@ -81,6 +99,9 @@ typedef struct mr_game_demo {
   gfx_sprite_instance_t instances[MR_GAME_MAX_INSTANCES];
   int instance_count;
 
+  mr_game_particle_t particles[MR_GAME_MAX_PARTICLES];
+  int particle_cursor;
+
   int player_index;
   int last_dx;
   int last_dy;
@@ -97,6 +118,9 @@ typedef struct mr_game_demo {
 void mr_game_demo_init(mr_game_demo_t *demo, int screen_w, int screen_h);
 void mr_game_demo_tick(mr_game_demo_t *demo, const mr_demo_input_t *input);
 void mr_game_demo_render(mr_game_demo_t *demo, gfx_renderer_t *renderer);
+void mr_game_demo_set_fps10(mr_game_demo_t *demo, unsigned long fps10,
+                            unsigned long avg_fps10);
+void mr_game_demo_restart(mr_game_demo_t *demo);
 int mr_game_demo_copy_instances(const mr_game_demo_t *demo,
                                 gfx_sprite_instance_t *out_instances,
                                 int max_instances);

@@ -50,7 +50,7 @@ option(MR_TESTS_SANITIZE
 option(MR_TESTS_WERROR
     "Treat warnings in the shared renderer core as errors" ON)
 option(MR_TESTS_INDEX8
-    "Build the core in 8-bit palette mode (the DOS pixel format) instead of RGB565"
+    "Optional legacy indexed-color regression build; shipping frontends use RGB565"
     OFF)
 
 set(MR_FUZZ_ITERATIONS 300 CACHE STRING
@@ -68,6 +68,7 @@ add_library(microrender_core STATIC
     "${MR_SHARED_SRC}/gfx_font5x7.c"
     "${MR_SHARED_SRC}/gfx_triangle.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
+    "${MR_SHARED_SRC}/mr_game_demo.c"
 )
 
 target_include_directories(microrender_core PUBLIC "${MR_SHARED_SRC}")
@@ -131,6 +132,7 @@ endfunction()
 
 mr_add_test_binary(mr_test_unit  mr_test_unit.c)
 mr_add_test_binary(mr_test_fuzz  mr_test_fuzz.c)
+mr_add_test_binary(mr_test_game  mr_test_game.c)
 
 # The benchmark measures the renderer, so it is always built optimised and
 # never linked against sanitizers, whatever the build type is.
@@ -149,6 +151,9 @@ enable_testing()
 
 add_test(NAME unit COMMAND mr_test_unit)
 set_tests_properties(unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
+add_test(NAME game COMMAND mr_test_game)
+set_tests_properties(game PROPERTIES TIMEOUT 60 LABELS "game")
 
 # Several seeds, so a regression that only shows up for particular geometry has
 # somewhere to surface. Each is deterministic and reproducible from its seed.

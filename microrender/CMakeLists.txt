@@ -56,6 +56,18 @@ if(NOT MR_APP STREQUAL "GAME" AND NOT MR_APP STREQUAL "STRESS")
     message(FATAL_ERROR "MR_APP must be GAME or STRESS, got '${MR_APP}'")
 endif()
 
+set(MR_GAME_PRESENTATION "pipelined" CACHE STRING
+    "Game presentation: raw or pipelined")
+set_property(CACHE MR_GAME_PRESENTATION PROPERTY STRINGS raw pipelined)
+if(MR_GAME_PRESENTATION STREQUAL "raw")
+    set(MR_GAME_PRESENT_MODE 0)
+elseif(MR_GAME_PRESENTATION STREQUAL "pipelined")
+    set(MR_GAME_PRESENT_MODE 1)
+else()
+    message(FATAL_ERROR
+        "MR_GAME_PRESENTATION must be raw or pipelined, got '${MR_GAME_PRESENTATION}'")
+endif()
+
 # ---------------------------------------------------------------------------
 # display / panel
 # ---------------------------------------------------------------------------
@@ -82,15 +94,16 @@ set(MR_PICO_PERI_PLL_KHZ 0      CACHE STRING "Peripheral PLL in kHz; 0 derives i
 option(MR_PICO_PERI_FROM_SYS  "Drive the peripheral clock from the system clock" ON)
 option(MR_PICO_CLOCK_REQUIRED "Fail at runtime if the requested system clock cannot be set" OFF)
 option(MR_PICO_FRAME_PIPELINE "Overlap tile rasterization with LCD DMA using a second tile buffer" ON)
+option(MR_PICO_GAME_SERIAL "Enable game USB FPS logs and screenshot commands" OFF)
 
 # ---------------------------------------------------------------------------
 # stress test configuration (ignored when MR_APP is GAME)
 # ---------------------------------------------------------------------------
 
 set(MR_STRESS_MODE "visible" CACHE STRING
-    "Presentation mode: visible, render, fixedrender, everyN, dirty, dirtyfixed, dirtyrect, dirtyrectfixed, lace, lacefixed, lcdtest")
+    "Presentation mode: raw, visible, render, fixedrender, everyN, dirty, dirtyfixed, dirtyrect, dirtyrectfixed, lace, lacefixed, lcdtest")
 set_property(CACHE MR_STRESS_MODE PROPERTY STRINGS
-    visible render fixedrender everyN dirty dirtyfixed dirtyrect dirtyrectfixed lace lacefixed lcdtest)
+    raw visible render fixedrender everyN dirty dirtyfixed dirtyrect dirtyrectfixed lace lacefixed lcdtest)
 
 set(MR_STRESS_SPRITES    1024 CACHE STRING "Sprites per frame")
 set(MR_STRESS_TARGET_FPS 60   CACHE STRING "Frame pacing target")
@@ -112,7 +125,9 @@ set(MR_STRESS_PICO_WAIT_USB_MS 0 CACHE STRING "Milliseconds to wait for USB enum
 # Translate the friendly mode name into the numeric flush mode plus the
 # orthogonal fixed-camera flag that the stress demo actually reads.
 set(MR_STRESS_FIXED_CAMERA 0)
-if(MR_STRESS_MODE STREQUAL "visible")
+if(MR_STRESS_MODE STREQUAL "raw")
+    set(MR_STRESS_FLUSH_MODE 7)
+elseif(MR_STRESS_MODE STREQUAL "visible")
     set(MR_STRESS_FLUSH_MODE 0)
 elseif(MR_STRESS_MODE STREQUAL "render")
     set(MR_STRESS_FLUSH_MODE 1)
@@ -140,7 +155,7 @@ elseif(MR_STRESS_MODE STREQUAL "lacefixed")
     set(MR_STRESS_FIXED_CAMERA 1)
 else()
     message(FATAL_ERROR
-        "Unknown MR_STRESS_MODE '${MR_STRESS_MODE}'. Valid values: visible, "
+        "Unknown MR_STRESS_MODE '${MR_STRESS_MODE}'. Valid values: raw, visible, "
         "render, fixedrender, everyN, dirty, dirtyfixed, dirtyrect, "
         "dirtyrectfixed, lace, lacefixed, lcdtest")
 endif()
@@ -158,6 +173,30 @@ endif()
 
 if(MR_VIEW_H GREATER MR_SCREEN_H)
     message(FATAL_ERROR "MR_VIEW_H (${MR_VIEW_H}) cannot exceed MR_SCREEN_H (${MR_SCREEN_H})")
+endif()
+
+if(NOT MR_SCREEN_W EQUAL 320 OR NOT MR_SCREEN_H EQUAL 240)
+    message(FATAL_ERROR
+        "MicroRender platform builds are fixed at a 320x240 RGB565 logical target")
+endif()
+
+# The raw reference paths intentionally render one complete logical frame and
+# only then begin the synchronous LCD transfer. A shorter tile would interleave
+# drawing and presentation and would no longer represent clear/draw/send/loop.
+if(MR_APP STREQUAL "GAME" AND MR_GAME_PRESENT_MODE EQUAL 0 AND
+   NOT MR_TILE_H EQUAL MR_SCREEN_H)
+    message(FATAL_ERROR
+        "Raw game presentation requires MR_TILE_H=${MR_SCREEN_H}; got ${MR_TILE_H}")
+endif()
+if(MR_APP STREQUAL "STRESS" AND MR_STRESS_FLUSH_MODE EQUAL 7)
+    if(NOT MR_TILE_H EQUAL MR_VIEW_H)
+        message(FATAL_ERROR
+            "Raw stress presentation requires MR_TILE_H=MR_VIEW_H (${MR_VIEW_H}); got ${MR_TILE_H}")
+    endif()
+    if(NOT MR_VIEW_H EQUAL MR_SCREEN_H)
+        message(FATAL_ERROR
+            "Raw stress presentation must send the complete ${MR_SCREEN_W}x${MR_SCREEN_H} frame")
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -265,6 +304,8 @@ target_compile_definitions(microrender PRIVATE
     MR_PICO_PERI_FROM_SYS=$<BOOL:${MR_PICO_PERI_FROM_SYS}>
     MR_PICO_CLOCK_REQUIRED=$<BOOL:${MR_PICO_CLOCK_REQUIRED}>
     MR_PICO_FRAME_PIPELINE=$<BOOL:${MR_PICO_FRAME_PIPELINE}>
+    MR_PICO_GAME_SERIAL=$<BOOL:${MR_PICO_GAME_SERIAL}>
+    MR_GAME_PRESENT_MODE=${MR_GAME_PRESENT_MODE}
 )
 
 if(MR_APP STREQUAL "STRESS")
@@ -328,7 +369,8 @@ target_link_libraries(microrender
     hardware_clocks
 )
 
-if(MR_APP STREQUAL "STRESS" AND MR_STRESS_PICO_SERIAL)
+if((MR_APP STREQUAL "STRESS" AND MR_STRESS_PICO_SERIAL) OR
+   (MR_APP STREQUAL "GAME" AND MR_PICO_GAME_SERIAL))
     pico_enable_stdio_usb(microrender 1)
 else()
     pico_enable_stdio_usb(microrender 0)
@@ -342,6 +384,8 @@ message(STATUS "MicroRender: app=${MR_APP} board=${PICO_BOARD}")
 if(MR_APP STREQUAL "STRESS")
     message(STATUS "MicroRender: mode=${MR_STRESS_MODE} (flush=${MR_STRESS_FLUSH_MODE}, "
                    "fixed_camera=${MR_STRESS_FIXED_CAMERA}) sprites=${MR_STRESS_SPRITES}")
+else()
+    message(STATUS "MicroRender: game presentation=${MR_GAME_PRESENTATION}")
 endif()
 message(STATUS "MicroRender: ${MR_SCREEN_W}x${MR_SCREEN_H} tile_h=${MR_TILE_H} "
                "view_h=${MR_VIEW_H} sys=${MR_PICO_SYS_KHZ}kHz spi=${MR_LCD_SPI_BAUD}Hz")

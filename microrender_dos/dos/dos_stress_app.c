@@ -1,10 +1,9 @@
-#define GFX_COLOR_INDEX8 1
-
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 
 #include "gfx.h"
@@ -12,14 +11,45 @@
 #include "dos_vga.h"
 
 #define DOS_SCREEN_W 320
-#define DOS_SCREEN_H 200
-#define DOS_TILE_H 16
+#define DOS_SCREEN_H 240
+#ifndef MR_DOS_TILE_H
+#define MR_DOS_TILE_H 16
+#endif
+#define DOS_TILE_H MR_DOS_TILE_H
+#ifndef MR_DOS_VSYNC
+#define MR_DOS_VSYNC 0
+#endif
+#ifndef MR_DOS_PRESENT_MODE
+#define MR_DOS_PRESENT_MODE 1 /* 0 raw full-frame staging, 1 direct tiled */
+#endif
+#define DOS_FRAME_PIXELS ((long)DOS_SCREEN_W * (long)DOS_SCREEN_H)
 
 static gfx_renderer_t dos_renderer;
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
 static mr_stress_test_t stress;
+#if MR_DOS_PRESENT_MODE == 0
+static gfx_color_t __huge *dos_raw_frame;
 
-
+static void capture_raw_tile(gfx_renderer_t GFX_PTR *r, int x, int y, int w,
+                             int h, const gfx_color_t GFX_PTR *pixels,
+                             void GFX_PTR *user) {
+  int row;
+  int col;
+  int stride;
+  (void)user;
+  if (!dos_raw_frame || !pixels || w <= 0 || h <= 0)
+    return;
+  stride = r ? r->tile_stride : w;
+  for (row = 0; row < h; ++row) {
+    gfx_color_t __huge *dst;
+    const gfx_color_t GFX_PTR *src;
+    dst = dos_raw_frame + (long)(y + row) * DOS_SCREEN_W + x;
+    src = pixels + (long)row * stride;
+    for (col = 0; col < w; ++col)
+      dst[col] = src[col];
+  }
+}
+#endif
 
 static void draw_stress_scene(gfx_renderer_t GFX_PTR *r, void GFX_PTR *user) {
   mr_stress_render(r, (mr_stress_test_t GFX_PTR *)user);
@@ -60,7 +90,7 @@ int main(int argc, char **argv) {
   int i;
 
   frame_limit = 2100;
-  no_vsync = 0;
+  no_vsync = MR_DOS_VSYNC ? 0 : 1;
 
   mr_stress_config_defaults(&cfg, DOS_SCREEN_W, DOS_SCREEN_H);
   cfg.sprite_count = 512;
@@ -123,14 +153,27 @@ int main(int argc, char **argv) {
   if (cfg.stats_sample_rate <= 0)
     cfg.stats_sample_rate = 8;
 
-  printf("MicroRender stress: sprites=%d frames=%d vsync=%s flush=%s target=%d "
+  printf("MicroRender 320x240 RGB565 Mode X stress: mode=%s sprites=%d frames=%d vsync=%s flush=%s target=%d "
          "statsrate=%d\n",
-         cfg.sprite_count, frame_limit, no_vsync ? "off" : "on",
-         dos_vga_flush_enabled() ? "on" : "off", cfg.target_fps, cfg.stats_sample_rate);
+         MR_DOS_PRESENT_MODE == 0 ? "raw" : "tiled", cfg.sprite_count,
+         frame_limit, no_vsync ? "off" : "on",
+         dos_vga_flush_enabled() ? "on" : "off", cfg.target_fps,
+         cfg.stats_sample_rate);
   printf("Press ESC during the run to stop early.\n");
 
+#if MR_DOS_PRESENT_MODE == 0
+  dos_raw_frame =
+      (gfx_color_t __huge *)halloc(DOS_FRAME_PIXELS, sizeof(gfx_color_t));
+  if (!dos_raw_frame) {
+    printf("ERROR: raw DOS mode needs a 150 KiB huge-memory framebuffer.\n");
+    return 1;
+  }
+  gfx_init(&dos_renderer, DOS_SCREEN_W, DOS_SCREEN_H, dos_tile_buffer,
+           DOS_TILE_H, capture_raw_tile, 0);
+#else
   gfx_init(&dos_renderer, DOS_SCREEN_W, DOS_SCREEN_H, dos_tile_buffer,
            DOS_TILE_H, dos_vga_flush_tile, 0);
+#endif
   mr_stress_init(&stress, &cfg);
 
   dos_vga_enter();
@@ -147,7 +190,12 @@ int main(int argc, char **argv) {
     saved_flush = dos_vga_flush_enabled();
     dos_vga_set_flush_enabled(1);
     mr_stress_tick(&stress);
+#if MR_DOS_PRESENT_MODE == 0
+    gfx_render_tiled(&dos_renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
+    dos_vga_present_rgb565_frame(dos_raw_frame);
+#else
     gfx_render_tiled_no_clear(&dos_renderer, draw_stress_scene, &stress);
+#endif
     delay(250);
     dos_vga_set_flush_enabled(saved_flush);
     start_tick = dos_vga_ticks();
@@ -168,7 +216,14 @@ int main(int argc, char **argv) {
     }
 
     mr_stress_tick(&stress);
+#if MR_DOS_PRESENT_MODE == 0
+    /* Raw reference: clear/draw every logical pixel, then upload the whole
+       completed frame. No tile is presented while rasterization is active. */
+    gfx_render_tiled(&dos_renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
+    dos_vga_present_rgb565_frame(dos_raw_frame);
+#else
     gfx_render_tiled_no_clear(&dos_renderer, draw_stress_scene, &stress);
+#endif
     ++frames;
 
     {
@@ -200,6 +255,10 @@ int main(int argc, char **argv) {
   mr_stress_get_metrics(&stress, &m);
 
   dos_vga_leave();
+#if MR_DOS_PRESENT_MODE == 0
+  hfree(dos_raw_frame);
+  dos_raw_frame = 0;
+#endif
 
   printf("MicroRender RLE/collision stress result\n");
   printf("sprites=%d frames=%lu ticks=%lu vsync=%s flush=%s\n",

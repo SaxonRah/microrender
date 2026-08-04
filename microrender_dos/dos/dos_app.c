@@ -4,8 +4,8 @@
     MicroRender DOS frontend, rewritten from scratch.
 
     This file intentionally owns only DOS-specific work:
-      - VGA mode 13h setup / restore
-      - RGB332 palette setup
+      - 320x240 unchained VGA (Mode X) setup / restore
+      - RGB565-to-fixed-RGB332 presentation conversion
       - keyboard input
       - optional scripted autoplay input
       - tile flush to A000
@@ -19,6 +19,7 @@
 #include <dos.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 
 #ifdef __WATCOMC__
@@ -37,8 +38,8 @@
 #error This DOS frontend expects Open Watcom for the 16-bit DOS target.
 #endif
 
-#if GFX_COLOR_FORMAT != GFX_COLOR_FORMAT_INDEX8
-#error DOS frontend expects GFX_COLOR_INDEX8=1.
+#if GFX_COLOR_FORMAT != GFX_COLOR_FORMAT_RGB565
+#error DOS frontend expects the shared RGB565 renderer.
 #endif
 
 #ifndef MK_FP
@@ -47,9 +48,18 @@
 #endif
 
 #define DOS_SCREEN_W 320
-#define DOS_SCREEN_H 200
-#define DOS_TILE_H 16
-#define DOS_TICK_HZ 70UL
+#define DOS_SCREEN_H 240
+#ifndef MR_DOS_TILE_H
+#define MR_DOS_TILE_H 16
+#endif
+#define DOS_TILE_H MR_DOS_TILE_H
+#ifndef MR_DOS_VSYNC
+#define MR_DOS_VSYNC 0
+#endif
+#ifndef MR_DOS_PRESENT_MODE
+#define MR_DOS_PRESENT_MODE 1 /* 0 raw full-frame staging, 1 direct tiled */
+#endif
+#define DOS_FRAME_PIXELS ((long)DOS_SCREEN_W * (long)DOS_SCREEN_H)
 
 typedef struct dos_options {
   int autoplay;
@@ -57,11 +67,15 @@ typedef struct dos_options {
   int wait_key_on_exit;
   int had_unknown_option;
   int show_help;
+  int vsync;
 } dos_options_t;
 
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
 static mr_game_demo_t dos_game;
 static gfx_renderer_t dos_renderer;
+#if MR_DOS_PRESENT_MODE == 0
+static gfx_color_t __huge *dos_raw_frame;
+#endif
 
 static int arg_eq(const char *a, const char *b) {
   while (*a && *b) {
@@ -111,6 +125,30 @@ static void dos_leave_video(void) {
   dos_keyboard_remove();
   dos_vga_leave();
 }
+
+
+#if MR_DOS_PRESENT_MODE == 0
+static void dos_capture_raw_tile(gfx_renderer_t GFX_PTR *r, int x, int y, int w,
+                                 int h,
+                                 const gfx_color_t GFX_PTR *pixels,
+                                 void GFX_PTR *user) {
+  int row;
+  int col;
+  int stride;
+  (void)user;
+  if (!dos_raw_frame || !pixels || w <= 0 || h <= 0)
+    return;
+  stride = r ? r->tile_stride : w;
+  for (row = 0; row < h; ++row) {
+    gfx_color_t __huge *dst;
+    const gfx_color_t GFX_PTR *src;
+    dst = dos_raw_frame + (long)(y + row) * DOS_SCREEN_W + x;
+    src = pixels + (long)row * stride;
+    for (col = 0; col < w; ++col)
+      dst[col] = src[col];
+  }
+}
+#endif
 
 static void dos_draw_game_scene(gfx_renderer_t GFX_PTR *r, void GFX_PTR *user) {
   mr_game_demo_t *game;
@@ -278,6 +316,7 @@ static void dos_print_usage(void) {
   printf("  /frames N             exit after N frames, useful for capture "
          "scripts\n");
   printf("  /wait                 wait for a key after exiting video mode\n");
+  printf("  /vsync, /novsync      enable/disable VGA retrace wait\n");
   printf("  /?, /help             show this help\n");
   printf("\n");
   printf("Keyboard:\n");
@@ -293,6 +332,7 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
   opt->wait_key_on_exit = 0;
   opt->show_help = 0;
   opt->had_unknown_option = 0;
+  opt->vsync = MR_DOS_VSYNC ? 1 : 0;
 
   for (i = 1; i < argc; ++i) {
     if (arg_eq(argv[i], "/?") || arg_eq(argv[i], "-?") ||
@@ -303,6 +343,10 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
       opt->autoplay = 1;
     } else if (arg_eq(argv[i], "/wait") || arg_eq(argv[i], "-wait")) {
       opt->wait_key_on_exit = 1;
+    } else if (arg_eq(argv[i], "/vsync") || arg_eq(argv[i], "-vsync")) {
+      opt->vsync = 1;
+    } else if (arg_eq(argv[i], "/novsync") || arg_eq(argv[i], "-novsync")) {
+      opt->vsync = 0;
     } else if ((arg_eq(argv[i], "/frames") || arg_eq(argv[i], "-frames")) &&
                i + 1 < argc) {
       ++i;
@@ -328,15 +372,33 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
 static int dos_run_shared_game(const dos_options_t *opt) {
   mr_demo_input_t input;
   unsigned long frame;
+  unsigned long start_tick;
+  unsigned long fps_tick;
+  unsigned long fps_frame;
   int running;
 
+#if MR_DOS_PRESENT_MODE == 0
+  /* dos_app_main allocates this before entering graphics mode so allocation
+     failures remain visible in the DOS text console. */
+  gfx_init(&dos_renderer, DOS_SCREEN_W, DOS_SCREEN_H, dos_tile_buffer,
+           DOS_TILE_H, dos_capture_raw_tile, 0);
+#else
   gfx_init(&dos_renderer, DOS_SCREEN_W, DOS_SCREEN_H, dos_tile_buffer,
            DOS_TILE_H, dos_vga_flush_tile, 0);
+#endif
 
   mr_game_demo_init(&dos_game, DOS_SCREEN_W, DOS_SCREEN_H);
+  printf("DOS Mode X: %dx%d logical RGB565, RGB332 VGA output, mode=%s, tile_h=%d, vsync=%s\n",
+         DOS_SCREEN_W, DOS_SCREEN_H,
+         MR_DOS_PRESENT_MODE == 0 ? "raw" : "tiled", DOS_TILE_H,
+         opt->vsync ? "on" : "off");
   mr_autodemo_reset();
 
   frame = 0UL;
+  start_tick = dos_vga_ticks();
+  fps_tick = start_tick;
+  fps_frame = 0UL;
+  mr_game_demo_set_fps10(&dos_game, 0ul, 0ul);
   running = 1;
 
   while (running) {
@@ -349,8 +411,33 @@ static int dos_run_shared_game(const dos_options_t *opt) {
     mr_game_demo_tick(&dos_game, &input);
     gfx_render_tiled(&dos_renderer, dos_draw_game_scene, &dos_game,
                      GFX_RGB565_BLACK);
+#if MR_DOS_PRESENT_MODE == 0
+    /* Deliberately unoptimized baseline: only after all strips have been
+       rasterized into one logical frame do we upload the complete frame. */
+    dos_vga_present_rgb565_frame(dos_raw_frame);
+#endif
 
     ++frame;
+
+    {
+      unsigned long now_tick;
+      unsigned long dt;
+      now_tick = dos_vga_ticks();
+      dt = now_tick - fps_tick;
+      if (dt >= 9ul) {
+        unsigned long df;
+        unsigned long total_dt;
+        unsigned long fps10;
+        unsigned long avg_fps10;
+        df = frame - fps_frame;
+        fps10 = (df * 182ul) / dt;
+        total_dt = now_tick - start_tick;
+        avg_fps10 = total_dt ? (frame * 182ul) / total_dt : 0ul;
+        mr_game_demo_set_fps10(&dos_game, fps10, avg_fps10);
+        fps_tick = now_tick;
+        fps_frame = frame;
+      }
+    }
 
     if (mr_game_demo_quit_requested(&dos_game)) {
       running = 0;
@@ -360,7 +447,8 @@ static int dos_run_shared_game(const dos_options_t *opt) {
       running = 0;
     }
 
-    dos_vga_wait_vblank();
+    if (opt->vsync)
+      dos_vga_wait_vblank();
   }
 
   return 0;
@@ -379,17 +467,30 @@ int dos_app_main(int argc, char **argv) {
 
   rc = 0;
 
+#if MR_DOS_PRESENT_MODE == 0
+  dos_raw_frame =
+      (gfx_color_t __huge *)halloc(DOS_FRAME_PIXELS, sizeof(gfx_color_t));
+  if (!dos_raw_frame) {
+    printf("ERROR: raw DOS mode needs a 150 KiB huge-memory framebuffer.\n");
+    return 1;
+  }
+#endif
+
   /* Safety net: dos_leave_video() restores both the INT 9 vector and the text
      mode, and is idempotent. Registering it means an exit() from anywhere
      below cannot leave DOS with a dangling interrupt vector. */
   atexit(dos_leave_video);
 
   dos_enter_video();
-  
 
   rc = dos_run_shared_game(&opt);
 
   dos_leave_video();
+
+#if MR_DOS_PRESENT_MODE == 0
+  hfree(dos_raw_frame);
+  dos_raw_frame = 0;
+#endif
 
   if (opt.wait_key_on_exit) {
     printf("Press any key...\n");

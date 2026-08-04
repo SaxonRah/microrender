@@ -8,6 +8,8 @@ cd /d "%MR_ROOT%"
 for %%D in (
     "build"
     "microrender\build"
+    "microrender\build-game-raw"
+    "microrender\build-stress-raw"
     "microrender\build-stress-visible"
     "microrender\build-stress-lace"
     "microrender\build-stress-render"

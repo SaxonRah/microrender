@@ -28,8 +28,20 @@ def load_presets(directory):
         return json.load(handle)
 
 
+def find_preset(presets, name):
+    for preset in presets.get("configurePresets", []):
+        if preset.get("name") == name:
+            return preset
+    available = [p.get("name") for p in presets.get("configurePresets", [])]
+    sys.stderr.write(
+        "error: no preset named '%s'\navailable: %s\n"
+        % (name, ", ".join(a for a in available if a))
+    )
+    raise SystemExit(1)
+
+
 def resolve(presets, name, seen=None):
-    """Merge a preset with everything it inherits from, nearest wins."""
+    """Merge cache variables from a preset inheritance chain; nearest wins."""
     if seen is None:
         seen = set()
     if name in seen:
@@ -37,16 +49,7 @@ def resolve(presets, name, seen=None):
         raise SystemExit(1)
     seen.add(name)
 
-    for preset in presets.get("configurePresets", []):
-        if preset.get("name") == name:
-            break
-    else:
-        available = [p.get("name") for p in presets.get("configurePresets", [])]
-        sys.stderr.write(
-            "error: no preset named '%s'\navailable: %s\n"
-            % (name, ", ".join(a for a in available if a))
-        )
-        raise SystemExit(1)
+    preset = find_preset(presets, name)
 
     merged = {}
     parents = preset.get("inherits", [])
@@ -60,12 +63,61 @@ def resolve(presets, name, seen=None):
     return merged
 
 
+def resolve_field(presets, name, field, seen=None):
+    """Resolve one inherited preset field, preferring the nearest definition."""
+    if seen is None:
+        seen = set()
+    if name in seen:
+        sys.stderr.write("error: circular inherits at preset '%s'\n" % name)
+        raise SystemExit(1)
+    seen.add(name)
+
+    preset = find_preset(presets, name)
+    if field in preset:
+        return preset[field]
+
+    parents = preset.get("inherits", [])
+    if isinstance(parents, str):
+        parents = [parents]
+    for parent in parents:
+        value = resolve_field(presets, parent, field, set(seen))
+        if value is not None:
+            return value
+    return None
+
+
 def main(argv):
-    if len(argv) != 3:
-        sys.stderr.write("usage: mr_preset_flags.py <directory> <preset>\n")
+    if len(argv) not in (3, 4):
+        sys.stderr.write(
+            "usage: mr_preset_flags.py <directory> <preset> "
+            "[--binary-dir|--generator]\n"
+        )
         return 1
 
-    variables = resolve(load_presets(argv[1]), argv[2])
+    directory = os.path.abspath(argv[1])
+    preset_name = argv[2]
+    presets = load_presets(directory)
+
+    if len(argv) == 4:
+        if argv[3] == "--binary-dir":
+            value = resolve_field(presets, preset_name, "binaryDir")
+            if not value:
+                sys.stderr.write("error: preset has no binaryDir\n")
+                return 1
+            value = value.replace("${sourceDir}", directory)
+            sys.stdout.write(os.path.normpath(value))
+            return 0
+        if argv[3] == "--generator":
+            value = resolve_field(presets, preset_name, "generator")
+            if not value:
+                sys.stderr.write("error: preset has no generator\n")
+                return 1
+            sys.stdout.write(str(value))
+            return 0
+        sys.stderr.write("error: unknown option %s\n" % argv[3])
+        return 1
+
+    variables = resolve(presets, preset_name)
 
     flags = []
     for key in sorted(variables):

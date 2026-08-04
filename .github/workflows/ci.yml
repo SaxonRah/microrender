@@ -17,21 +17,16 @@ concurrency:
 
 jobs:
   host-sanitized:
-    name: ${{ matrix.os }} / ${{ matrix.pixel_format }} / ASan+UBSan
+    name: ${{ matrix.os }} / RGB565 / ASan+UBSan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        # Every shipping frontend now uses the same RGB565 logical renderer.
         # Pin runner generations so a "-latest" migration cannot silently
         # replace the compiler underneath the test matrix.
         os: [ubuntu-24.04, macos-15]
-        pixel_format: [rgb565, index8]
-        include:
-          - pixel_format: rgb565
-            index8: "OFF"
-          - pixel_format: index8
-            index8: "ON"
 
     steps:
       - uses: actions/checkout@v6
@@ -42,20 +37,20 @@ jobs:
         run: >
           cmake -S tests -B build-tests
           -DCMAKE_BUILD_TYPE=Debug
-          -DMR_TESTS_INDEX8=${{ matrix.index8 }}
+          -DMR_TESTS_INDEX8=OFF
           -DMR_TESTS_WERROR=ON
           -DMR_TESTS_SANITIZE=ON
 
       - name: Build
         run: cmake --build build-tests --parallel
 
-      - name: Unit tests
+      - name: Unit and shared-game behavior tests
         run: >
           ctest --test-dir build-tests
           --output-on-failure
           --timeout 60
           --no-tests=error
-          -R '^unit$'
+          -R '^(unit|game)$'
 
       - name: Deterministic fuzz seeds
         run: >
@@ -66,19 +61,9 @@ jobs:
           -R '^fuzz_'
 
   host-windows:
-    name: windows-2022 / VS2022 / ${{ matrix.pixel_format }}
+    name: windows-2022 / VS2022 / RGB565
     runs-on: windows-2022
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        pixel_format: [rgb565, index8]
-        include:
-          - pixel_format: rgb565
-            index8: "OFF"
-          - pixel_format: index8
-            index8: "ON"
-
     steps:
       - uses: actions/checkout@v6
 
@@ -91,21 +76,21 @@ jobs:
           cmake -S tests -B build-tests
           -G "Visual Studio 17 2022"
           -A x64
-          -DMR_TESTS_INDEX8=${{ matrix.index8 }}
+          -DMR_TESTS_INDEX8=OFF
           -DMR_TESTS_WERROR=ON
           -DMR_TESTS_SANITIZE=OFF
 
       - name: Build
         run: cmake --build build-tests --config Debug --parallel
 
-      - name: Unit tests
+      - name: Unit and shared-game behavior tests
         run: >
           ctest --test-dir build-tests
           --build-config Debug
           --output-on-failure
           --timeout 60
           --no-tests=error
-          -R '^unit$'
+          -R '^(unit|game)$'
 
       - name: Deterministic fuzz seeds
         run: >
@@ -115,6 +100,32 @@ jobs:
           --timeout 120
           --no-tests=error
           -R '^fuzz_'
+
+  raylib-headless:
+    name: Raylib frontend / headless API check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure against CI shim
+        run: >
+          cmake -S microrender_raylib -B build-raylib-ci
+          -DCMAKE_BUILD_TYPE=Release
+          -DMR_RAYLIB_PATH=${{ github.workspace }}/tests/raylib_stub
+
+      - name: Build
+        run: cmake --build build-raylib-ci --parallel
+
+      - name: Execute every presentation path
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=./build-raylib-ci/microrender_raylib
+          for mode in raw tiled lace dirtyrect; do
+            "$exe" --demo game --mode "$mode" --autoplay --frames 24 --fps 0
+          done
+          "$exe" --demo stress --mode tiled --sprites 128 --frames 24 --fps 0
 
   benchmark:
     name: benchmark (informational)

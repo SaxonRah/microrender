@@ -8,51 +8,121 @@ setlocal EnableExtensions EnableDelayedExpansion
 if "%MR_ROOT%"=="" set "MR_ROOT=%~dp0.."
 cd /d "%MR_ROOT%"
 
+if /i "%~1"=="run" shift /1
 set "WHAT=%~1"
 if "%WHAT%"=="" set "WHAT=dos"
+shift /1
 
-if /i "%WHAT%"=="dos"    goto r_dos
-if /i "%WHAT%"=="stress" goto r_stress
-if /i "%WHAT%"=="tests"  goto r_tests
-if /i "%WHAT%"=="bench"  goto r_bench
-echo ERROR: unknown run target "%WHAT%". Try: dos, stress, tests, bench.
+if /i "%WHAT%"=="dos"       goto r_dos
+if /i "%WHAT%"=="dosraw"    goto r_dosraw
+if /i "%WHAT%"=="stress"    goto r_stress
+if /i "%WHAT%"=="stressraw" goto r_stressraw
+if /i "%WHAT%"=="tests"     goto r_tests
+if /i "%WHAT%"=="bench"     goto r_bench
+if /i "%WHAT%"=="raylib"    goto r_raylib
+echo ERROR: unknown run target "%WHAT%". Try: dos, dosraw, stress, stressraw, raylib, tests, bench.
 exit /b 1
 
 rem ---------------------------------------------------------------------------
 :r_tests
+set "PRESET=debug"
+if /i "%~1"=="index8" set "PRESET=index8"
 call "%MR_ROOT%\scripts\mr_tools.bat" cmake
 if errorlevel 1 exit /b 1
-set "PRESET=debug"
-if /i "%~2"=="index8" set "PRESET=index8"
+pushd "%MR_ROOT%\tests" >nul
+if errorlevel 1 exit /b 1
 ctest --preset "%PRESET%"
-exit /b %ERRORLEVEL%
+set "TEST_RC=!ERRORLEVEL!"
+popd >nul
+exit /b !TEST_RC!
 
 :r_bench
-set "FRAMES=%~2"
+set "FRAMES=%~1"
 if "%FRAMES%"=="" set "FRAMES=200"
 call "%MR_ROOT%\scripts\mr_tools.bat" cmake
 if errorlevel 1 exit /b 1
-cmake --preset bench -S "%MR_ROOT%\tests"
+pushd "%MR_ROOT%\tests" >nul
 if errorlevel 1 exit /b 1
-cmake --build --preset bench
-if errorlevel 1 exit /b 1
-"%MR_ROOT%\build\bench\mr_test_bench.exe" %FRAMES%
+cmake --preset bench
+if errorlevel 1 (
+    set "BENCH_RC=!ERRORLEVEL!"
+    popd >nul
+    exit /b !BENCH_RC!
+)
+cmake --build --preset bench --parallel
+if errorlevel 1 (
+    set "BENCH_RC=!ERRORLEVEL!"
+    popd >nul
+    exit /b !BENCH_RC!
+)
+popd >nul
+set "BENCH_EXE=%MR_ROOT%\build\bench\mr_test_bench.exe"
+if not exist "!BENCH_EXE!" set "BENCH_EXE=%MR_ROOT%\build\bench\Release\mr_test_bench.exe"
+if not exist "!BENCH_EXE!" (
+    echo ERROR: benchmark executable was not produced.
+    exit /b 1
+)
+"!BENCH_EXE!" %FRAMES%
+exit /b %ERRORLEVEL%
+
+rem ---------------------------------------------------------------------------
+:r_raylib
+set "MR_FORWARD_ARGS="
+:r_raylib_args
+if "%~1"=="" goto r_raylib_launch
+set "MR_FORWARD_ARGS=!MR_FORWARD_ARGS! "%~1""
+shift /1
+goto r_raylib_args
+:r_raylib_launch
+set "RAYEXE=%MR_ROOT%\build\raylib\microrender_raylib.exe"
+if not exist "%RAYEXE%" set "RAYEXE=%MR_ROOT%\build\raylib\Release\microrender_raylib.exe"
+if not exist "%RAYEXE%" (
+    echo ERROR: Raylib frontend not built.
+    echo Build it first: mr build raylib
+    exit /b 1
+)
+"%RAYEXE%" !MR_FORWARD_ARGS!
 exit /b %ERRORLEVEL%
 
 rem ---------------------------------------------------------------------------
 :r_dos
 set "EXE=mrender.exe"
-set "DOSARGS=%~2 %~3 %~4 %~5 %~6 %~7 %~8 %~9"
-goto launch
+goto collect_dos_args
+
+:r_dosraw
+set "EXE=mraw.exe"
+goto collect_dos_args
+
+:collect_dos_args
+set "DOSARGS="
+:collect_dos_args_loop
+if "%~1"=="" goto launch
+set "DOSARGS=!DOSARGS! "%~1""
+shift /1
+goto collect_dos_args_loop
 
 :r_stress
 set "EXE=mstress.exe"
-set "SPRITES=%~2"
+goto collect_stress_args
+
+:r_stressraw
+set "EXE=msraw.exe"
+
+:collect_stress_args
+set "SPRITES=%~1"
 if "%SPRITES%"=="" set "SPRITES=512"
-set "FRAMES=%~3"
+set "FRAMES=%~2"
 if "%FRAMES%"=="" set "FRAMES=2100"
-set "DOSARGS=/sprites %SPRITES% /frames %FRAMES% /novsync %~4 %~5 %~6 %~7 %~8 %~9"
-goto launch
+shift /1
+shift /1
+set "MR_FORWARD_ARGS="
+:collect_stress_args_loop
+if "%~1"=="" goto collect_stress_args_done
+set "MR_FORWARD_ARGS=!MR_FORWARD_ARGS! "%~1""
+shift /1
+goto collect_stress_args_loop
+:collect_stress_args_done
+set "DOSARGS=/sprites %SPRITES% /frames %FRAMES% /novsync !MR_FORWARD_ARGS!"
 
 rem ---------------------------------------------------------------------------
 :launch
@@ -82,8 +152,8 @@ if "%CYCLES%"=="" set "CYCLES=max"
 
 set "CONF=%TEMP%\microrender_%RANDOM%.conf"
 
-rem machine=vgaonly keeps mode 13h on the real VGA path rather than through
-rem SVGA emulation. Both runners need it; only one of the old ones had it.
+rem machine=vgaonly keeps the 320x240 unchained Mode X path on real VGA
+rem emulation instead of routing it through an SVGA compatibility layer.
 > "%CONF%" echo [dosbox]
 >>"%CONF%" echo machine=vgaonly
 >>"%CONF%" echo [sdl]
@@ -97,14 +167,14 @@ rem SVGA emulation. Both runners need it; only one of the old ones had it.
 >>"%CONF%" echo [autoexec]
 >>"%CONF%" echo mount c "%DOSROOT%"
 >>"%CONF%" echo c:
->>"%CONF%" echo echo MicroRender: %EXE% %DOSARGS%  [cycles=%CYCLES%]
->>"%CONF%" echo %EXE% %DOSARGS%
+>>"%CONF%" echo echo MicroRender: %EXE% !DOSARGS!  [cycles=%CYCLES%]
+>>"%CONF%" echo %EXE% !DOSARGS!
 >>"%CONF%" echo echo.
 >>"%CONF%" echo echo Finished. Press any key to close DOSBox.
 >>"%CONF%" echo pause
 >>"%CONF%" echo exit
 
-echo Launching %EXE% %DOSARGS% (cycles=%CYCLES%)
+echo Launching %EXE% !DOSARGS! (cycles=%CYCLES%)
 rem Run in the foreground so the exit code propagates to capture scripts.
 "%MR_DOSBOX%" -conf "%CONF%"
 set "RC=%ERRORLEVEL%"

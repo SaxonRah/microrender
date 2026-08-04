@@ -1,50 +1,70 @@
 # Pico 2 presentation modes
 
-The stress test can present a frame several different ways. Rendering cost is
-identical across all of them; what changes is how much pixel data goes out over
-SPI and how it is spread across frames. Select one with `MR_STRESS_MODE`.
+Pico game and stress builds use a fixed 320×240 RGB565 logical framebuffer and
+render FPS plus average FPS in the HUD.
 
-Measurements below are the 1024-sprite stress scene on the tested ILI9341 panel
-at 300 MHz system clock and 75 MHz SPI.
+## Game modes
 
-| mode | what it does | FPS | artifacts |
-| --- | --- | ---: | --- |
-| `visible` | uploads every RGB565 pixel every frame | ~55.8 | none |
-| `lace` | full 320x240 render, alternating row groups presented per frame | ~76–77 | temporal row tearing on fast motion |
-| `dirtyrect` | coalesced dirty rectangles only | scene-dependent | none |
-| `everyN` | full upload every Nth frame | ~N x | visible stutter |
-| `render` | rasterize only, one proof frame then no further flushes | renderer ceiling | nothing displayed |
-
-`render` is the one to use when measuring the rasterizer rather than the panel:
-it removes SPI bandwidth from the loop entirely.
-
-## Building a mode
+| `MR_GAME_PRESENTATION` | behavior |
+| --- | --- |
+| `raw` | clear/draw the complete 320×240 frame, synchronously send it, loop |
+| `pipelined` | use DMA so frame N is sent while frame N+1 is rendered |
 
 ```bat
+mr build pico game
+mr build pico game-raw
+mr build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
+```
+
+Raw game mode requires `MR_TILE_H=240`. It deliberately allocates no second
+render buffer, preserving SRAM while remaining a true serialized baseline.
+
+## Stress modes
+
+| mode | what it measures or presents | artifacts |
+| --- | --- | --- |
+| `raw` | complete render followed by synchronous full-frame upload | none |
+| `visible` | optimized full-frame RGB565 DMA presentation | none |
+| `lace` | alternating row groups per presentation | faint temporal shimmer on fast motion |
+| `dirtyrect` | changed rectangles only | none; gain is scene-dependent |
+| `everyN` | full upload every Nth rendered frame | visible stutter |
+| `render` | rasterization after one proof frame; no ongoing LCD transfer | display stops changing |
+| `dirty` | older full-frame comparison path | none |
+| `lcdtest` | LCD-focused diagnostic path | diagnostic only |
+
+Known hardware measurements for the 1,024-sprite scene at 300 MHz system clock
+and an actual 75 MHz SPI clock:
+
+| mode | result |
+| --- | ---: |
+| `visible` | about 55.8 FPS |
+| `lace` | about 76–77 FPS |
+| `dirtyrect` | scene-dependent and configured separately |
+
+These are not interchangeable configurations. The provided `dirtyrect` preset
+uses 512 sprites and 16-row tiles.
+
+## Build examples
+
+```bat
+mr build pico stress-raw
 mr build pico stress-visible
-mr build pico stress-lace
-mr build pico stress-render
-mr build pico stress-dirtyrect
+mr build pico stress-lace sprites=1024 lace=4 sys=300000 spi=75000000
+mr build pico stress-render sprites=1024 serial=ON
+mr build pico stress-dirtyrect sprites=512 tile=16
+mr build pico all
 ```
 
-Or directly, when you want to vary something a preset does not cover:
+`mr build pico all` is the command-line smoke test for the complete preset
+matrix. Every preset uses Ninja and the Pico ARM GCC toolchain. Incompatible
+Visual Studio/MSVC caches are removed automatically before reconfiguration.
 
-```bat
-cmake -S microrender -B microrender/build ^
-      -DMR_APP=STRESS -DMR_STRESS_MODE=lace -DMR_STRESS_SPRITES=1024 ^
-      -DMR_PICO_SYS_KHZ=300000 -DMR_LCD_SPI_BAUD=75000000 ^
-      -DMR_VIEW_H=240 -DMR_STRESS_HUD_MODE=2 -DMR_STRESS_LACE_BLOCK_H=4
-cmake --build microrender/build
-```
+Raw stress mode requires a 240-row tile and full 240-row view. CMake rejects a
+partial-height raw configuration.
 
-`cmake -LH -S microrender -B microrender/build` lists every option with its
-documentation.
+## Friendly names and numeric modes
 
-## Mode names
-
-Each name maps to a numeric flush mode plus an orthogonal fixed-camera flag:
-
-| `MR_STRESS_MODE` | flush mode | fixed camera |
+| name | numeric flush mode | fixed camera |
 | --- | ---: | ---: |
 | `visible` | 0 | no |
 | `render` | 1 | no |
@@ -57,9 +77,8 @@ Each name maps to a numeric flush mode plus an orthogonal fixed-camera flag:
 | `dirtyrectfixed` | 5 | yes |
 | `lace` | 6 | no |
 | `lacefixed` | 6 | yes |
+| `raw` | 7 | no |
 
-The fixed-camera variants hold the camera still so the dirty-rect and caching
-paths see a static background, which is the case they are designed for.
-
-`dirty` and `lcdtest` reserve a full-frame buffer, so pair them with
-`-DMR_TILE_H=16`. CMake warns at configure time if you do not.
+Fixed-camera variants isolate presentation behavior from background movement.
+Modes that retain a previous full frame should use small tiles to stay within
+RP2350 SRAM.

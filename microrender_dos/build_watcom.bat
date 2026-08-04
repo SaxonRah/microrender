@@ -9,12 +9,29 @@ if /I "%TARGET%"=="clean" goto clean
 if /I "%TARGET%"=="rebuild" (
     call "%~f0" clean
     if errorlevel 1 goto fail
-    set "TARGET=%~2"
-    if "%TARGET%"=="" set "TARGET=dos16"
+    if "%~2"=="" (
+        call "%~f0" dos16 tiled
+    ) else (
+        call "%~f0" dos16 "%~2"
+    )
+    exit /b %ERRORLEVEL%
 )
 if /I not "%TARGET%"=="dos16" if /I not "%TARGET%"=="dos" (
     echo ERROR: unknown target "%TARGET%"
-    echo Use: dos16, dos, clean, rebuild [dos16]
+    echo Use: dos16 [raw|tiled], dos [raw|tiled], clean, rebuild [raw|tiled]
+    exit /b 1
+)
+
+set "MODE=%~2"
+if "%MODE%"=="" set "MODE=tiled"
+if /I "%MODE%"=="raw" (
+    set "PRESENT_ID=0"
+    set "MODE_TAG=raw"
+) else if /I "%MODE%"=="tiled" (
+    set "PRESENT_ID=1"
+    set "MODE_TAG=tiled"
+) else (
+    echo ERROR: presentation mode must be raw or tiled, got "%MODE%"
     exit /b 1
 )
 
@@ -23,17 +40,20 @@ if errorlevel 1 goto fail
 call :make_dirs
 if errorlevel 1 goto fail
 
-set "OBJDIR=build\obj\dos16"
-set "ERRDIR=build\err\dos16"
+set "OBJDIR=build\obj\dos16_%MODE_TAG%"
+set "ERRDIR=build\err\dos16_%MODE_TAG%"
 if not exist "%OBJDIR%" mkdir "%OBJDIR%"
 if not exist "%ERRDIR%" mkdir "%ERRDIR%"
-set "EXE=dist\mrender.exe"
+if /I "%MODE_TAG%"=="raw" (set "EXE=dist\mraw.exe") else (set "EXE=dist\mrender.exe")
 
-rem DOS is native VGA INDEX8. Shared renderer code decides color type from this define.
-set "CFLAGS=-q -bt=dos -ml -2 -ox -s -w4 -dGFX_FIXED_NO_INT64 -dGFX_COLOR_INDEX8=1 -dGFX_ENABLE_TRIANGLES=1 -i=..\shared\src -i=dos"
+rem Shared DOS renderer is 320x240 RGB565; Mode X quantizes only at VGA upload.
+set "CFLAGS=-q -bt=dos -ml -2 -ox -s -w4 -dGFX_FIXED_NO_INT64 -dGFX_COLOR_INDEX8=0 -dGFX_ENABLE_TRIANGLES=1 -i=..\shared\src -i=dos"
+if "%MR_DOS_TILE_H%"=="" set "MR_DOS_TILE_H=16"
+if "%MR_DOS_VSYNC%"=="" set "MR_DOS_VSYNC=0"
+set "CFLAGS=%CFLAGS% -dMR_DOS_TILE_H=%MR_DOS_TILE_H% -dMR_DOS_VSYNC=%MR_DOS_VSYNC% -dMR_DOS_PRESENT_MODE=%PRESENT_ID%"
 set "LFLAGS=-q -bt=dos -ml"
 
-echo Building MicroRender 16-bit DOS large-model target from ..\shared\src...
+echo Building MicroRender 16-bit DOS large-model target [%MODE_TAG%] from ..\shared\src...
 echo WATCOM: %WATCOM%
 echo Compiler: %OW_WCC%
 echo Linker: %OW_WCL%
@@ -60,7 +80,9 @@ if errorlevel 1 goto fail
 call :compile dos\dos_main.c "%OBJDIR%\dos_main.obj" "%ERRDIR%\dos_main.err"
 if errorlevel 1 goto fail
 call :compile dos\dos_app.c "%OBJDIR%\dos_app.obj" "%ERRDIR%\dos_app.err"
+if errorlevel 1 goto fail
 call :compile dos\dos_keyboard.c "%OBJDIR%\dos_keyboard.obj" "%ERRDIR%\dos_keyboard.err"
+if errorlevel 1 goto fail
 call :compile dos\dos_vga.c "%OBJDIR%\dos_vga.obj" "%ERRDIR%\dos_vga.err"
 if errorlevel 1 goto fail
 
@@ -153,6 +175,7 @@ if exist *.obj del /q *.obj
 if exist *.err del /q *.err
 if exist *.map del /q *.map
 if exist mrender.exe del /q mrender.exe
+if exist mraw.exe del /q mraw.exe
 echo Clean OK.
 goto done
 

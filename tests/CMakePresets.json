@@ -1,6 +1,10 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "debug",
@@ -15,24 +19,49 @@
     {
       "name": "index8",
       "inherits": "debug",
-      "displayName": "Host tests, 8-bit palette (the DOS pixel format)",
+      "displayName": "Host tests, optional legacy 8-bit compatibility",
       "binaryDir": "${sourceDir}/../build/tests-index8",
-      "cacheVariables": { "MR_TESTS_INDEX8": "ON" }
+      "cacheVariables": {
+        "MR_TESTS_INDEX8": "ON"
+      }
     },
     {
       "name": "bench",
       "displayName": "Host benchmark (optimised, no sanitizers)",
       "binaryDir": "${sourceDir}/../build/bench",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug",  "configurePreset": "debug" },
-    { "name": "index8", "configurePreset": "index8" },
-    { "name": "bench",  "configurePreset": "bench" }
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "index8",
+      "configurePreset": "index8"
+    },
+    {
+      "name": "bench",
+      "configurePreset": "bench"
+    }
   ],
   "testPresets": [
-    { "name": "debug",  "configurePreset": "debug",  "output": { "outputOnFailure": true } },
-    { "name": "index8", "configurePreset": "index8", "output": { "outputOnFailure": true } }
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "index8",
+      "configurePreset": "index8",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }

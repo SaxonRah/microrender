@@ -7,16 +7,22 @@ rem  of which differed only in a couple of hardcoded arguments. Variants are now
 rem  arguments, not separate files.
 rem
 rem    mr build assets           regenerate GAME.MRP and the embedded C assets
-rem    mr build dos              16-bit DOS: mrender.exe and mstress.exe
-rem    mr build pico [preset]    RP2350 firmware (default preset: game)
+rem    mr build dos [mode=both]  16-bit DOS optimized + raw executables
+rem    mr build pico [preset|all] [key=value ...]
+rem                              RP2350 firmware; settings are command-line flags
+rem    mr build raylib [key=value ...]
+rem                              desktop 320x240 RGB565 frontend
 rem    mr build pico <preset> vscode
 rem                              same, but configured into microrender\build so
 rem                              the VS Code Flash and Debug buttons use it
 rem    mr build tests            host test binaries
 rem    mr build all              everything the local toolchain supports
 rem
-rem    mr run dos [args]         game demo in DOSBox
-rem    mr run stress [n] [f]     stress test in DOSBox: n sprites, f frames
+rem    mr run dos [args]         optimized game demo in DOSBox
+rem    mr run dosraw [args]      raw draw-then-present baseline
+rem    mr run stress [n] [f]     optimized stress test in DOSBox
+rem    mr run stressraw [n] [f]  raw stress baseline
+rem    mr run raylib [args...]    desktop game/stress frontend
 rem    mr test [index8]          host unit + fuzz suite under ASan/UBSan
 rem    mr bench [frames]         host benchmark
 rem
@@ -63,11 +69,14 @@ echo.
 goto do_help
 
 :do_build
-call "%MR_ROOT%\scripts\mr_build.bat" %1 %2 %3 %4 %5 %6 %7 %8 %9
+rem Forward the complete original argument list; the worker strips the leading
+rem "build" token. This avoids the old nine-argument ceiling on key=value
+rem configuration overrides.
+call "%MR_ROOT%\scripts\mr_build.bat" %*
 exit /b %ERRORLEVEL%
 
 :do_run
-call "%MR_ROOT%\scripts\mr_run.bat" %1 %2 %3 %4 %5 %6 %7 %8 %9
+call "%MR_ROOT%\scripts\mr_run.bat" %*
 exit /b %ERRORLEVEL%
 
 :do_test
@@ -101,15 +110,25 @@ exit /b 1
 :do_help
 echo MicroRender build and run driver.
 echo.
-echo   mr build assets ^| dos ^| pico [preset] [vscode] ^| tests ^| all
-echo   mr run dos [args...]              game demo in DOSBox
-echo   mr run stress [sprites] [frames]  stress test in DOSBox
+echo   mr build assets ^| dos [mode=raw/tiled/both] [tile=N] [vsync=0/1] ^| pico [preset] [settings] ^| raylib [settings] ^| tests ^| all
+echo   mr run dos ^| dosraw [args...]     optimized or raw game in DOSBox
+echo   mr run stress ^| stressraw [sprites] [frames]
+echo   mr run raylib [args...]            desktop frontend
 echo   mr test [index8]                  host suite under ASan/UBSan
 echo   mr bench [frames]                 host benchmark
 echo   mr clean
 echo.
-echo Pico presets: game, stress-visible, stress-lace, stress-render,
-echo               stress-dirtyrect
+echo Pico presets: game, game-raw, stress-raw, stress-visible, stress-lace,
+echo               stress-render, stress-dirtyrect, all
+echo.
+echo Friendly build settings:
+echo   pico:   tile=N sprites=N sys=N spi=N pipeline=ON/OFF mode=NAME
+echo           presentation=raw/pipelined hud=N lace=N serial=ON/OFF
+echo   dos:    mode=raw/tiled/both tile=N vsync=0/1
+echo   raylib: demo=game/stress mode=raw/tiled/lace/dirtyrect tile=N
+echo           scale=N sprites=N fps=N autoplay=ON/OFF lace=N
+echo           raylib=C:\path\to\raylib
+echo   advanced: pass any MR_...=value CMake cache variable through mr build
 echo.
 echo See the header of mr.bat for environment overrides.
 exit /b 0

@@ -1,142 +1,181 @@
 # Building MicroRender
 
-Everything runs through `mr.bat` at the repository root. Run it from there, not
-from a subdirectory.
+Run commands from the repository root through `mr.bat`.
 
 ```bat
 mr help
 ```
 
+All shipping frontends use a 320×240 RGB565 logical render target. Build-time
+settings are passed as `key=value` arguments; runtime settings use normal
+frontend arguments.
+
 ---
 
 ## Host tests and benchmark
 
-The only target with no external toolchain requirement: CMake and any C99
-compiler.
+Requires CMake and a C99 compiler.
 
 ```bat
 mr build tests
 mr test
-mr test index8      :: same suite with the core in the DOS pixel format
 mr bench 200
 ```
 
-`mr test` builds and runs the unit suite plus four fuzz seeds under
-AddressSanitizer and UndefinedBehaviorSanitizer. See `tests/README.md`.
+The normal suite is RGB565 and contains unit, shared-game, and deterministic
+fuzz tests. The optional `mr test index8` remains useful as a legacy core-format
+compatibility check, but no shipping frontend uses it.
+
+---
+
+## Raylib desktop frontend
+
+Raylib gives Windows, Linux, and macOS a real-time host frontend for the same
+320×240 RGB565 game and stress demos.
+
+Install Raylib so CMake can find it, set `CMAKE_PREFIX_PATH`, or supply a source
+checkout:
+
+```bat
+mr build raylib raylib=C:\src\raylib
+```
+
+Build defaults are configurable:
+
+```bat
+mr build raylib demo=game mode=tiled tile=16 scale=3 fps=0 autoplay=OFF
+mr build raylib demo=stress mode=lace sprites=1024 lace=4 fps=0
+```
+
+Run-time options can override the compiled defaults:
+
+```bat
+mr run raylib --demo game --mode raw --autoplay
+mr run raylib --demo game --mode tiled --tile 16 --scale 4
+mr run raylib --demo stress --mode dirtyrect --sprites 512
+mr run raylib --demo stress --mode lace --sprites 1024 --lace-block 4
+```
+
+Modes:
+
+| mode | behavior |
+| --- | --- |
+| `raw` | draw complete frame, upload complete RGB565 texture, loop |
+| `tiled` | upload each completed tile directly |
+| `lace` | update alternating row groups |
+| `dirtyrect` | compare RGB565 frames and upload one bounding changed rectangle |
+
+Every mode renders FPS and average FPS in the shared HUD.
 
 ---
 
 ## 16-bit DOS
 
-Requires Open Watcom, with `WATCOM` pointing at the install root.
+Requires Open Watcom with `WATCOM` pointing to the install root.
 
 ```bat
-mr build dos
+set WATCOM=C:\WATCOM
+mr build dos mode=both tile=16 vsync=0
 ```
 
-Builds both `mrender.exe` (game demo) and `mstress.exe` (stress test), and
-stages them in `microrender_dos\dosroot\`.
+Outputs:
 
-### Running
+| executable | demo | presentation |
+| --- | --- | --- |
+| `mrender.exe` | shared game | optimized direct tiled Mode X upload |
+| `mraw.exe` | shared game | raw full-frame staging and upload |
+| `mstress.exe` | stress | optimized direct tiled upload |
+| `msraw.exe` | stress | raw full-frame staging and upload |
 
-```bat
-mr run dos                    :: game demo, keyboard control
-mr run dos /auto              :: shared autodemo input, no keyboard
-mr run dos /frames 2000       :: exit after N frames, for capture scripts
-
-mr run stress                 :: 512 sprites, 2100 frames
-mr run stress 1024            :: 1024 sprites
-mr run stress 1024 2100 /notri :: extra flags pass through to mstress.exe
-```
-
-`mrender.exe` accepts `/auto`, `/frames N`, `/wait` and `/?`. Anything else now
-produces a warning rather than being silently ignored.
-
-### Benchmark cycles
-
-DOSBox defaults to `cycles=max`, which measures your host CPU rather than a
-period machine. Pin it before quoting any framerate:
+Run them through DOSBox:
 
 ```bat
-set MR_DOSBOX_CYCLES=fixed 12000
+mr run dos /auto
+mr run dosraw /auto
 mr run stress 512 2100
+mr run stressraw 512 2100
 ```
 
-| target | value |
-| --- | --- |
-| 386DX/33 | `fixed 3000` |
-| 486DX2/66 | `fixed 12000` |
-| Pentium 100 | `fixed 30000` |
-| unbounded | `max` |
+The shared renderer remains 320×240 RGB565. Standard VGA is palettized, so the
+final Mode X upload converts RGB565 to a fixed RGB332 palette. Raw mode uses an
+Open Watcom huge-memory 150 KiB frame; optimized mode needs only the configured
+small tile.
 
-`start_watcom_here.bat` in `microrender_dos\` opens an Open Watcom shell if you
-want to drive the compiler directly.
+Build settings:
+
+```bat
+mr build dos mode=raw tile=16 vsync=0
+mr build dos mode=tiled tile=8 vsync=1
+mr build dos mode=both tile=16 vsync=0
+```
+
+`tile` changes the renderer working-strip height. `vsync` changes the default;
+`/vsync` and `/novsync` can still override it at runtime.
 
 ---
 
 ## Pico 2 / RP2350
 
-Requires the Pico SDK 2.2.0, ARM GCC, Ninja and CMake — all installed by the
-official Raspberry Pi Pico VS Code extension.
+Requires Pico SDK, ARM GCC, CMake, and Ninja.
+
+Common presets:
 
 ```bat
-mr build pico                     :: game demo (default preset)
+mr build pico game
+mr build pico game-raw
 mr build pico stress-visible
+mr build pico stress-raw
 mr build pico stress-lace
 mr build pico stress-render
 mr build pico stress-dirtyrect
+mr build pico all
 ```
 
-Copy the resulting `.uf2` to the Pico in BOOTSEL mode.
+`mr build pico all` configures and builds every Pico preset. Pico command-line
+builds always run from `microrender\`, use the `Ninja` generator and the Pico
+ARM GCC toolchain, and automatically remove a stale build directory previously
+configured with Visual Studio/MSVC. This makes the command safe to run from an
+ordinary PowerShell, Developer PowerShell, or VS Code terminal.
 
-### Flashing through the debug probe from VS Code
-
-The Pico extension's tasks and the Cortex-Debug launch config are hardcoded to
-`microrender/build`, while each preset uses its own directory. Add `vscode` to
-configure a preset into `microrender/build` so the extension picks it up:
+Override preset settings on the same command line:
 
 ```bat
-mr build pico stress-lace vscode
+mr build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
+mr build pico stress-visible tile=240 sprites=1024 pipeline=ON serial=ON
+mr build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
 ```
 
-Then open the `microrender` folder in VS Code and either:
+Friendly settings:
 
-- **F5** — flashes through the probe and drops into the debugger, or
-- **Ctrl+Shift+P** to **Tasks: Run Task** to **Flash** — flashes and runs
-  without attaching a debugger, or
-- **Tasks: Run Task** to **Run Project** — loads over USB with `picotool`
-  instead of the probe, no wiring needed.
-
-Without the `vscode` argument the extension would flash whatever was previously
-in `microrender/build`, which is usually not the variant you just built.
-
-Probe wiring for the Debug Probe or a second Pico running `debugprobe`:
-
-| probe | target |
+| key | CMake option |
 | --- | --- |
-| SWCLK | SWCLK |
-| SWDIO | SWDIO |
-| GND | GND |
+| `tile=N` | `MR_TILE_H` |
+| `sprites=N` | `MR_STRESS_SPRITES` |
+| `sys=N` | `MR_PICO_SYS_KHZ` |
+| `spi=N` | `MR_LCD_SPI_BAUD` |
+| `pipeline=ON/OFF` | `MR_PICO_FRAME_PIPELINE` |
+| `mode=NAME` | `MR_STRESS_MODE` |
+| `presentation=raw/pipelined` | `MR_GAME_PRESENTATION` |
+| `hud=N` | `MR_STRESS_HUD_MODE` |
+| `lace=N` | `MR_STRESS_LACE_BLOCK_H` |
+| `target=N` | `MR_STRESS_TARGET_FPS` |
+| `serial=ON/OFF` | `MR_STRESS_PICO_SERIAL` and `MR_PICO_GAME_SERIAL` |
+| `diag=ON/OFF` | `MR_STRESS_PICO_DIAG` |
 
-If OpenOCD cannot halt the target — common after flashing firmware that
-overclocks — run **Tasks: Run Task** to **Rescue Reset**, then flash again.
-
-Build variants are CMake options, not scripts. To vary something a preset does
-not cover:
+Any cache variable beginning with `MR_` can also be passed through directly:
 
 ```bat
-cmake -S microrender -B microrender/build ^
-      -DMR_APP=STRESS -DMR_STRESS_MODE=lace -DMR_STRESS_SPRITES=1024
-cmake --build microrender/build
+mr build pico stress-dirtyrect MR_STRESS_DIRTY_MERGE_GAP=6 MR_STRESS_DIRTY_FULL_THRESHOLD_PCT=80
 ```
 
-`cmake -LH -S microrender -B microrender/build` lists every option with its
-documentation. See `PICO_PRESENTATION_MODES.md` for what each mode does and
-what it costs.
+Raw Pico modes intentionally require `tile=240` and a full 240-row view. CMake
+rejects shorter raw configurations because they would no longer represent the
+requested clear-frame/draw-everything/send-complete-frame loop.
 
-The stress build shows FPS, average FPS, and visible/bucket/draw/collision
-counts on an on-screen HUD; add `-DMR_STRESS_PICO_SERIAL=ON` (or use the
-`stress-render` preset) to get the same over USB serial.
+The generated `.uf2` is in the preset's build directory. Copy it to the Pico in
+BOOTSEL mode.
+
+See [PICO_PRESENTATION_MODES.md](PICO_PRESENTATION_MODES.md).
 
 ---
 
@@ -146,25 +185,22 @@ counts on an on-screen HUD; add `-DMR_STRESS_PICO_SERIAL=ON` (or use the
 mr build assets
 ```
 
-Regenerates `shared\generated\GAME.MRP` and the embedded C assets from
-`shared\assets\project.json`. The Pico build runs this automatically as a CMake
-custom command; the DOS build runs it via `mr build dos`.
+Regenerates the MRP package and embedded C data. CI builds the pack twice and
+requires byte-identical output and a valid MRP header.
 
 ---
 
-## Everything
+## Everything available locally
 
 ```bat
 mr build all
 ```
 
-Builds assets and host tests, then DOS and Pico if their toolchains are
-present. Missing toolchains are reported and skipped rather than failing the
-run.
+This always builds assets and host tests, then attempts DOS, Pico, and Raylib
+when their toolchains are available.
 
 ```bat
 mr clean
 ```
 
-Removes all build output. Committed generated assets are left alone;
-regenerate those with `mr build assets`.
+removes build output.

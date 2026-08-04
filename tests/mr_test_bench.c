@@ -115,9 +115,9 @@ static void bench_tile_heights(mrt_fb_t *fb, gfx_color_t *tile, int frames) {
            (long)((long)W * th * (long)sizeof(gfx_color_t)), fps);
   }
   printf("\n  Taller tiles mean fewer flushes and fewer per-tile sprite\n"
-         "  rejections, at the cost of RAM. 16 rows is 10 KiB at 320px wide,\n"
-         "  which is the largest tile that fits a single 64 KiB DOS segment\n"
-         "  alongside everything else.\n\n");
+         "  rejections, at the cost of RAM. 16 rows is the DOS default: a\n"
+         "  10 KiB working tile that leaves comfortable segment space for\n"
+         "  renderer state, stacks, sprites, and the rest of the program.\n\n");
 }
 
 int main(int argc, char **argv) {

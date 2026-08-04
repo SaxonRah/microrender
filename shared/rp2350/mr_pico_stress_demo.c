@@ -52,6 +52,8 @@
  * 6 = lace: full 320x240 render every frame, but present alternating row
  *     groups each frame.  This keeps full physical resolution and cuts the
  *     SPI payload roughly in half, at the cost of temporal combing/stale rows.
+ * 7 = raw: deliberately serialized baseline. Clear/draw a complete frame,
+ *     synchronously send the whole frame, then begin the next iteration.
  */
 #ifndef MR_STRESS_PICO_FLUSH_MODE
 #define MR_STRESS_PICO_FLUSH_MODE 0
@@ -178,10 +180,10 @@
 #endif
 
 static gfx_color_t tile_buffer_a[MR_SCREEN_W * MR_TILE_H];
-#if ((MR_STRESS_PICO_FLUSH_MODE == 5) || (MR_STRESS_PICO_FLUSH_MODE == 6)) && \
-    (MR_TILE_H >= MR_VIEW_H)
-static gfx_color_t tile_buffer_b[1];
-#else
+#if !(((MR_STRESS_PICO_FLUSH_MODE == 5) || \
+       (MR_STRESS_PICO_FLUSH_MODE == 6) || \
+       (MR_STRESS_PICO_FLUSH_MODE == 7)) && \
+      (MR_TILE_H >= MR_VIEW_H))
 static gfx_color_t tile_buffer_b[MR_SCREEN_W * MR_TILE_H];
 #endif
 #if MR_STRESS_NEEDS_FULL_FRAME
@@ -191,10 +193,10 @@ static gfx_color_t stress_prev_frame[1];
 #endif
 #if MR_STRESS_NEEDS_DIRTY_RECT
 /*
- * Full-res dirty-rectangle mode must not keep both a current and previous
- * 320x240 frame.  With MR_TILE_H=240 the two render buffers are already
- * 300 KiB.  Keep only the previous full frame, compare against the freshly
- * rendered tile buffer in-place, then copy only flushed pixels into prev.
+ * Full-res dirty-rectangle mode must not allocate an additional pipeline
+ * buffer. With MR_TILE_H=240, the current render tile plus the previous frame
+ * already consume 300 KiB. Compare against the freshly rendered tile in-place,
+ * then copy only flushed pixels into the previous-frame buffer.
  */
 static gfx_color_t stress_dirty_rect_buffer[MR_SCREEN_W * MR_STRESS_PICO_DIRTY_RECT_MAX_H];
 static int16_t stress_dirty_row_x0[MR_VIEW_H];
@@ -207,18 +209,21 @@ static int stress_dirtyrect_src_h;
 #endif
 static gfx_renderer_t renderer;
 static mr_stress_test_t stress;
-static mr_pico_ili9341_t lcd = {MR_LCD_SPI,
-                                0u,
-                                MR_LCD_PIN_MISO,
-                                MR_LCD_PIN_CS,
-                                MR_LCD_PIN_SCK,
-                                MR_LCD_PIN_MOSI,
-                                MR_LCD_PIN_RST,
-                                MR_LCD_PIN_DC,
-                                MR_LCD_SPI_BAUD,
-                                0,
-                                0,
-                                0u};
+static mr_pico_ili9341_t lcd = {
+    .spi = MR_LCD_SPI,
+    .dma_chan = 0u,
+    .pin_miso = MR_LCD_PIN_MISO,
+    .pin_cs = MR_LCD_PIN_CS,
+    .pin_sck = MR_LCD_PIN_SCK,
+    .pin_mosi = MR_LCD_PIN_MOSI,
+    .pin_rst = MR_LCD_PIN_RST,
+    .pin_dc = MR_LCD_PIN_DC,
+    .spi_baud_hz = MR_LCD_SPI_BAUD,
+    .x_offset = 0,
+    .y_offset = 0,
+    .dma_active = 0u,
+    .spi_format_bits = 0u,
+    .dma_cfg16 = {0}};
 
 static unsigned long frame_counter;
 static uint32_t start_fps_ms;
@@ -1114,7 +1119,11 @@ void mr_pico_stress_demo_main(void) {
     stress_dirtyrect_src = 0;
 #endif
     mr_stress_tick(&stress);
-#if (MR_STRESS_PICO_FLUSH_MODE == 6) && (MR_TILE_H >= MR_VIEW_H)
+#if MR_STRESS_PICO_FLUSH_MODE == 7
+    /* Deliberately unoptimized reference path: render, synchronously flush,
+       then loop. No DMA/raster overlap. */
+    gfx_render_tiled(&renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
+#elif (MR_STRESS_PICO_FLUSH_MODE == 6) && (MR_TILE_H >= MR_VIEW_H)
     stress_render_fullframe_lace(tile_buffer_a);
 #elif (MR_STRESS_PICO_FLUSH_MODE == 5) && (MR_TILE_H >= MR_VIEW_H)
     stress_render_fullframe_dirtyrect(tile_buffer_a);

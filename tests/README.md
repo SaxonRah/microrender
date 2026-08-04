@@ -1,7 +1,7 @@
 # MicroRender host tests
 
-Builds the shared renderer core for the host so it can be unit tested, fuzzed
-and benchmarked without a Pico SDK, Open Watcom or DOSBox.
+The host suite builds the shared 320×240 RGB565 renderer and game code without
+requiring the Pico SDK, Open Watcom, DOSBox, or Raylib.
 
 ```sh
 cmake -S tests -B build/tests -DCMAKE_BUILD_TYPE=Debug
@@ -9,63 +9,65 @@ cmake --build build/tests
 ctest --test-dir build/tests --output-on-failure
 ```
 
-Or with presets: `cmake --preset debug && ctest --preset debug`.
+## Tests
 
-## What is here
+### `mr_test_unit.c`
 
-**`mr_test_unit.c`** — behavioural assertions, not smoke tests.
+Behavioral renderer tests. The main equivalence test renders a sprite through
+the three transparency-preserving paths—per-pixel colorkey, linear-scan RLE,
+and row-indexed RLE—at 132 screen-edge, tile-seam, clipped, partially offscreen,
+and fully offscreen positions, then compares the resulting framebuffers byte
+for byte.
 
-The centrepiece is `test_blit_path_equivalence`. The three
-transparency-preserving blit paths (colorkey, linear-scan RLE, RLE with a
-row-start index) are three implementations of one specification, so they must
-produce identical output. The test renders the same sprite through all three at
-132 positions — every screen edge, both
-sides of every 16-row tile seam, partially and fully offscreen — and compares
-framebuffers byte for byte. A disagreement localises the bug to whichever path
-is the odd one out, which is what makes it safe to keep optimising the RLE
-path. The raw opaque path is excluded on purpose: it writes every pixel,
-including the ones the transparent paths skip, so it implements a different
-specification and has its own alignment test.
+Raw opaque drawing intentionally has a separate alignment test because it
+writes pixels that transparent paths skip.
 
-The rest covers blit pixel alignment, colorkey transparency, `fill_rect` and
-clip-window boundaries (inclusive lower, exclusive upper), rect algebra
-including the touch-versus-overlap distinction that dirty-rect merging depends
-on, dirty list bounding and full-redraw fallback, the tile capacity clamp,
-every rejection case in `gfx_sprite_rle_validate()`, degenerate sprites (zero
-and negative dimensions, null pixels), and collision resolution at negative
-world coordinates.
+Other coverage includes clipping, rectangle algebra, dirty-list merging and
+fallback, tile-capacity clamping, RLE validation failures, degenerate sprites,
+and collision resolution at negative coordinates.
 
-**`mr_test_fuzz.c`** — every drawing entry point called with coordinates from
--4000 to +4000, through randomised clip windows, sub-region (dirty-rect)
-passes, and the pipelined double-buffered path. The flush callback
-independently re-validates every rect the renderer hands it, so a bad tile rect
-is caught even where it would not have overflowed. Deterministic: takes
-iterations and a seed, and ctest registers four seeds.
+### `mr_test_game.c`
 
-```sh
-./build/tests/mr_test_fuzz 1000 0xC0FFEE
-```
+Deterministic shared-game behavior:
 
-**`mr_test_bench.c`** — compares blit paths and sweeps tile height. Always
-built optimised and never linked against sanitizers, since a benchmark under
-ASan measures ASan.
+- 320×240 screen and 1024×1024 stage dimensions
+- camera clamping at every world edge
+- collider-aware player stage bounds
+- pickup collection and particle creation
+- enemy contact restart
+- complete pickup reset after restart
+- player/camera reset and FPS/debug-state preservation
+- prevention of the old double-movement bug
 
-**`mr_test_support.h`** — framebuffer flush target, deterministic RNG,
-assertion macros. The framebuffer is heap-allocated on purpose: under
-AddressSanitizer the redzones turn a stray write from a flush into a hard
-failure instead of silent corruption of an adjacent global.
+### `mr_test_fuzz.c`
+
+Calls every drawing entry point with coordinates from -4000 to +4000 through
+randomized clip windows, sub-region passes, and the pipelined double-buffered
+path. The flush callback independently validates every rectangle. CTest
+registers four deterministic seeds.
+
+### `mr_test_bench.c`
+
+Optimized host benchmark for blit paths and tile-height sweeps. It is not linked
+against sanitizers because sanitizer overhead would invalidate the comparison.
 
 ## Options
 
 | option | default | meaning |
 | --- | --- | --- |
-| `MR_TESTS_SANITIZE` | on in Debug for GCC/Clang; off for MSVC | ASan + UBSan on GCC/Clang; opt-in ASan-only on MSVC |
-| `MR_TESTS_WERROR` | `ON` | `-Werror` on the shared core |
-| `MR_TESTS_INDEX8` | `OFF` | build the core in the DOS 8-bit palette format |
-| `MR_FUZZ_ITERATIONS` | 300 | iterations per ctest fuzz run |
+| `MR_TESTS_SANITIZE` | on in Debug for GCC/Clang | ASan + UBSan; optional ASan on MSVC |
+| `MR_TESTS_WERROR` | `ON` | warnings are errors |
+| `MR_TESTS_INDEX8` | `OFF` | optional legacy core-format compatibility build; shipping frontends are RGB565 |
+| `MR_FUZZ_ITERATIONS` | 300 | iterations per registered fuzz seed |
 
-CI runs both pixel formats under ASan+UBSan on pinned Linux and macOS
-runners. Windows is pinned to Windows Server 2022 and Visual Studio 2022, with
-sanitizers explicitly disabled: this provides mandatory MSVC correctness
-coverage while avoiding a hosted VS2026/MSVC-ASan test hang. Every unit and
-fuzz test has an individual timeout, and each job has a hard wall-clock limit.
+CI requires RGB565 unit, game, and fuzz success on pinned Linux, macOS, and
+Windows/VS2022 jobs. Linux and macOS use ASan+UBSan; Windows uses the ordinary
+MSVC runtime because hosted MSVC AddressSanitizer previously hung.
+
+## Raylib frontend CI check
+
+`tests/raylib_stub/` is a small headless API shim used only in CI. Actions
+builds the real `microrender_raylib/main.c` frontend against it and executes
+raw, tiled, lace, dirty-rectangle, game, and stress paths for a finite number
+of frames. Normal desktop builds still require real Raylib.
+

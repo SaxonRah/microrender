@@ -1,18 +1,20 @@
 @echo off
 rem MicroRender build driver. Invoked through mr.bat; see there for usage.
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 if "%MR_ROOT%"=="" set "MR_ROOT=%~dp0.."
 cd /d "%MR_ROOT%"
 
+if /i "%~1"=="build" shift /1
 set "WHAT=%~1"
 if "%WHAT%"=="" set "WHAT=all"
 
 if /i "%WHAT%"=="assets" goto b_assets
 if /i "%WHAT%"=="dos"    goto b_dos
 if /i "%WHAT%"=="pico"   goto b_pico
+if /i "%WHAT%"=="raylib" goto b_raylib
 if /i "%WHAT%"=="tests"  goto b_tests
 if /i "%WHAT%"=="all"    goto b_all
-echo ERROR: unknown build target "%WHAT%". Try: assets, dos, pico, tests, all.
+echo ERROR: unknown build target "%WHAT%". Try: assets, dos, pico, raylib, tests, all.
 exit /b 1
 
 rem ---------------------------------------------------------------------------
@@ -22,11 +24,6 @@ where python >nul 2>nul || set "MR_PY=py"
 where %MR_PY% >nul 2>nul
 if errorlevel 1 (
     echo ERROR: no Python interpreter found on PATH ^(tried python, py^).
-    exit /b 1
-)
-if not exist "%MR_ROOT%\shared\tools\mr_pack.py" (
-    echo ERROR: "%MR_ROOT%\shared\tools\mr_pack.py" not found.
-    echo Run mr.bat from the repository root, not from an unpacked patch bundle.
     exit /b 1
 )
 if not exist "%MR_ROOT%\shared\generated" mkdir "%MR_ROOT%\shared\generated"
@@ -50,64 +47,240 @@ rem ---------------------------------------------------------------------------
 :b_dos
 call "%MR_ROOT%\scripts\mr_tools.bat" watcom
 if errorlevel 1 exit /b 1
+set "MR_DOS_TILE_H=16"
+set "MR_DOS_VSYNC=0"
+set "MR_DOS_MODE=both"
+shift /1
+:dos_opts
+if "%~1"=="" goto dos_opts_done
+for /f "tokens=1,* delims==" %%A in ("%~1") do (
+    if /i "%%A"=="tile" set "MR_DOS_TILE_H=%%B"
+    if /i "%%A"=="tile_h" set "MR_DOS_TILE_H=%%B"
+    if /i "%%A"=="vsync" set "MR_DOS_VSYNC=%%B"
+    if /i "%%A"=="mode" set "MR_DOS_MODE=%%B"
+    if /i "%%A"=="presentation" set "MR_DOS_MODE=%%B"
+)
+shift /1
+goto dos_opts
+:dos_opts_done
 call "%MR_ROOT%\scripts\mr_build.bat" assets
 if errorlevel 1 exit /b 1
-echo [dos] building mrender.exe and mstress.exe with Open Watcom ...
+echo [dos] 320x240 RGB565 logical target, Mode X RGB332 presentation
+echo [dos] mode=%MR_DOS_MODE% tile_h=%MR_DOS_TILE_H% vsync_default=%MR_DOS_VSYNC%
 cd /d "%MR_ROOT%\microrender_dos"
-call build_watcom.bat dos16
+if /i "%MR_DOS_MODE%"=="both" goto dos_build_both
+if /i "%MR_DOS_MODE%"=="raw" goto dos_build_raw
+if /i "%MR_DOS_MODE%"=="tiled" goto dos_build_tiled
+echo ERROR: DOS mode must be raw, tiled, or both.
+exit /b 1
+
+:dos_build_both
+call build_watcom.bat dos16 tiled
 if errorlevel 1 exit /b 1
-call build_watcom_stress.bat
+call build_watcom_stress.bat dos16 tiled
 if errorlevel 1 exit /b 1
+call build_watcom.bat dos16 raw
+if errorlevel 1 exit /b 1
+call build_watcom_stress.bat dos16 raw
+if errorlevel 1 exit /b 1
+goto dos_stage
+
+:dos_build_raw
+call build_watcom.bat dos16 raw
+if errorlevel 1 exit /b 1
+call build_watcom_stress.bat dos16 raw
+if errorlevel 1 exit /b 1
+goto dos_stage
+
+:dos_build_tiled
+call build_watcom.bat dos16 tiled
+if errorlevel 1 exit /b 1
+call build_watcom_stress.bat dos16 tiled
+if errorlevel 1 exit /b 1
+
+:dos_stage
 if not exist "%MR_ROOT%\microrender_dos\dosroot" mkdir "%MR_ROOT%\microrender_dos\dosroot"
-if exist dist\mrender.exe copy /Y dist\mrender.exe dosroot\mrender.exe >nul
-if exist dist\mstress.exe copy /Y dist\mstress.exe dosroot\mstress.exe >nul
-echo [dos] ok - binaries staged in microrender_dos\dosroot
+for %%F in (mrender.exe mstress.exe mraw.exe msraw.exe) do (
+    if exist "dist\%%F" copy /Y "dist\%%F" "dosroot\%%F" >nul
+)
+echo [dos] ok - optimized and raw binaries staged in microrender_dos\dosroot
 exit /b 0
 
 rem ---------------------------------------------------------------------------
 :b_pico
 call "%MR_ROOT%\scripts\mr_tools.bat" cmake
 if errorlevel 1 exit /b 1
+call "%MR_ROOT%\microrender\pico_env_auto.bat"
+if errorlevel 1 exit /b 1
+
+rem The Pico SDK requires a cross-compiler-friendly generator.  Put the SDK's
+rem bundled Ninja and ARM GCC first on PATH so CMake cannot silently select the
+rem Visual Studio generator/MSVC merely because the command was launched from
+rem a Developer PowerShell or a VS Code terminal.
+for %%D in ("%NINJA_EXE%") do set "PATH=%%~dpD;%PICO_TOOLCHAIN_PATH%\bin;%PATH%"
+set "PICO_SOURCE=%MR_ROOT%\microrender"
+
 set "PRESET=%~2"
 if "%PRESET%"=="" set "PRESET=game"
+set "PICO_VSCODE=0"
+set "EXTRA_FLAGS="
+shift /1
+shift /1
+:pico_opts
+if "%~1"=="" goto pico_opts_done
+if /i "%~1"=="vscode" (
+    set "PICO_VSCODE=1"
+) else (
+    for /f "tokens=1,* delims==" %%A in ("%~1") do (
+        set "MR_KEY=%%A"
+        if /i "!MR_KEY:~0,3!"=="MR_" set "EXTRA_FLAGS=!EXTRA_FLAGS! -D%%A=%%B"
+        if /i "%%A"=="tile" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=%%B"
+        if /i "%%A"=="tile_h" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_TILE_H=%%B"
+        if /i "%%A"=="sprites" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_SPRITES=%%B"
+        if /i "%%A"=="sys" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_SYS_KHZ=%%B"
+        if /i "%%A"=="spi" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_LCD_SPI_BAUD=%%B"
+        if /i "%%A"=="pipeline" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_PICO_FRAME_PIPELINE=%%B"
+        if /i "%%A"=="mode" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_MODE=%%B"
+        if /i "%%A"=="presentation" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_GAME_PRESENTATION=%%B"
+        if /i "%%A"=="hud" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_HUD_MODE=%%B"
+        if /i "%%A"=="lace" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_LACE_BLOCK_H=%%B"
+        if /i "%%A"=="target" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_TARGET_FPS=%%B"
+        if /i "%%A"=="serial" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_SERIAL=%%B -DMR_PICO_GAME_SERIAL=%%B"
+        if /i "%%A"=="diag" set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_DIAG=%%B"
+    )
+)
+shift /1
+goto pico_opts
+:pico_opts_done
 
-rem "vscode" as the third argument configures into microrender\build instead of
-rem the preset's own directory. Every task in microrender\.vscode\tasks.json and
-rem the Cortex-Debug launch config are hardcoded to ${workspaceFolder}/build, so
-rem this is what makes the extension's Flash and Debug buttons pick up the
-rem variant you actually asked for rather than whatever was in build\ before.
-if /i "%~3"=="vscode" goto b_pico_vscode
+if "%PICO_VSCODE%"=="1" goto b_pico_vscode
+if /i "%PRESET%"=="all" goto b_pico_all
 
-echo [pico] configuring preset "%PRESET%" ...
-cmake --preset "%PRESET%" -S "%MR_ROOT%\microrender"
-if errorlevel 1 goto b_pico_badpreset
-cmake --build --preset "%PRESET%"
+call :pico_build_preset "%PRESET%"
 if errorlevel 1 exit /b 1
 echo [pico] ok - copy the .uf2 to the Pico in BOOTSEL mode
 exit /b 0
 
+:b_pico_all
+echo [pico] building every Pico preset with Ninja + ARM GCC ...
+for %%P in (game game-raw stress-visible stress-raw stress-lace stress-render stress-dirtyrect) do (
+    call :pico_build_preset "%%P"
+    if errorlevel 1 exit /b 1
+)
+echo [pico] all presets built successfully
+exit /b 0
+
 :b_pico_vscode
+if /i "%PRESET%"=="all" (
+    echo ERROR: the vscode option needs one preset, not "all".
+    exit /b 1
+)
 set "MR_PY=python"
 where python >nul 2>nul || set "MR_PY=py"
-for /f "delims=" %%F in ('%MR_PY% "%MR_ROOT%\scripts\mr_preset_flags.py" "%MR_ROOT%\microrender" "%PRESET%"') do set "PRESET_FLAGS=%%F"
+set "PRESET_FLAGS="
+for /f "delims=" %%F in ('%MR_PY% "%MR_ROOT%\scripts\mr_preset_flags.py" "%PICO_SOURCE%" "%PRESET%"') do set "PRESET_FLAGS=%%F"
 if not defined PRESET_FLAGS goto b_pico_badpreset
+set "PICO_BUILD_DIR=%PICO_SOURCE%\build"
+call :pico_prepare_build_dir "%PICO_BUILD_DIR%"
+if errorlevel 1 exit /b 1
 echo [pico] configuring preset "%PRESET%" into microrender\build for VS Code ...
-echo [pico] %PRESET_FLAGS%
-cmake -S "%MR_ROOT%\microrender" -B "%MR_ROOT%\microrender\build" -G Ninja %PRESET_FLAGS%
+cmake -S "%PICO_SOURCE%" -B "%PICO_BUILD_DIR%" -G Ninja ^
+    -DCMAKE_MAKE_PROGRAM:FILEPATH="%NINJA_EXE%" %PRESET_FLAGS% %EXTRA_FLAGS%
 if errorlevel 1 exit /b 1
-cmake --build "%MR_ROOT%\microrender\build"
+cmake --build "%PICO_BUILD_DIR%" --parallel
 if errorlevel 1 exit /b 1
-echo.
 echo [pico] ok - microrender\build is now the "%PRESET%" build.
-echo        In VS Code: Ctrl+Shift+P then "Tasks: Run Task" ^> Flash
-echo        or press F5 to flash and debug through the probe.
+exit /b 0
+
+:pico_build_preset
+set "PICO_ONE_PRESET=%~1"
+set "MR_PY=python"
+where python >nul 2>nul || set "MR_PY=py"
+set "PICO_BUILD_DIR="
+for /f "delims=" %%D in ('%MR_PY% "%MR_ROOT%\scripts\mr_preset_flags.py" "%PICO_SOURCE%" "%PICO_ONE_PRESET%" --binary-dir') do set "PICO_BUILD_DIR=%%D"
+if not defined PICO_BUILD_DIR goto b_pico_badpreset
+call :pico_prepare_build_dir "%PICO_BUILD_DIR%"
+if errorlevel 1 exit /b 1
+
+echo [pico] configuring preset "%PICO_ONE_PRESET%" %EXTRA_FLAGS% ...
+pushd "%PICO_SOURCE%" >nul
+if errorlevel 1 (
+    echo ERROR: could not enter Pico source directory "%PICO_SOURCE%".
+    exit /b 1
+)
+cmake --preset "%PICO_ONE_PRESET%" ^
+    -DCMAKE_MAKE_PROGRAM:FILEPATH="%NINJA_EXE%" %EXTRA_FLAGS%
+if errorlevel 1 (
+    set "PICO_ERR=!ERRORLEVEL!"
+    popd >nul
+    exit /b !PICO_ERR!
+)
+cmake --build --preset "%PICO_ONE_PRESET%" --parallel
+if errorlevel 1 (
+    set "PICO_ERR=!ERRORLEVEL!"
+    popd >nul
+    exit /b !PICO_ERR!
+)
+popd >nul
+exit /b 0
+
+:pico_prepare_build_dir
+set "PICO_CHECK_DIR=%~1"
+if not exist "%PICO_CHECK_DIR%\CMakeCache.txt" exit /b 0
+set "PICO_CACHE_BAD=0"
+findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
+if errorlevel 1 set "PICO_CACHE_BAD=1"
+findstr /I /C:"arm-none-eabi-gcc" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
+if errorlevel 1 set "PICO_CACHE_BAD=1"
+if "%PICO_CACHE_BAD%"=="1" (
+    echo [pico] removing stale non-Ninja/non-ARM build directory:
+    echo        %PICO_CHECK_DIR%
+    rmdir /S /Q "%PICO_CHECK_DIR%"
+    if exist "%PICO_CHECK_DIR%" (
+        echo ERROR: could not remove stale Pico build directory.
+        echo Close Visual Studio, VS Code build tasks, or any terminal using it and retry.
+        exit /b 1
+    )
+)
 exit /b 0
 
 :b_pico_badpreset
-echo.
-echo Available presets: game, stress-visible, stress-lace, stress-render,
-echo                    stress-dirtyrect
+echo Available presets: game, game-raw, stress-raw, stress-visible, stress-lace,
+echo                    stress-render, stress-dirtyrect, all
 exit /b 1
+
+rem ---------------------------------------------------------------------------
+:b_raylib
+call "%MR_ROOT%\scripts\mr_tools.bat" cmake
+if errorlevel 1 exit /b 1
+set "RAY_FLAGS=-DCMAKE_BUILD_TYPE=Release"
+shift /1
+:ray_opts
+if "%~1"=="" goto ray_opts_done
+for /f "tokens=1,* delims==" %%A in ("%~1") do (
+    set "MR_KEY=%%A"
+    if /i "!MR_KEY:~0,3!"=="MR_" set "RAY_FLAGS=!RAY_FLAGS! -D%%A=%%B"
+    if /i "%%A"=="demo" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_DEMO=%%B"
+    if /i "%%A"=="mode" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_MODE=%%B"
+    if /i "%%A"=="tile" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=%%B"
+    if /i "%%A"=="tile_h" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_TILE_H=%%B"
+    if /i "%%A"=="scale" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SCALE=%%B"
+    if /i "%%A"=="sprites" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_SPRITES=%%B"
+    if /i "%%A"=="fps" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_FPS=%%B"
+    if /i "%%A"=="autoplay" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_AUTOPLAY=%%B"
+    if /i "%%A"=="lace" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_DEFAULT_LACE_BLOCK_H=%%B"
+    if /i "%%A"=="raylib" set "RAY_FLAGS=!RAY_FLAGS! -DMR_RAYLIB_PATH:PATH="%%B""
+)
+shift /1
+goto ray_opts
+:ray_opts_done
+echo [raylib] configuring 320x240 RGB565 host frontend ...
+cmake -S "%MR_ROOT%\microrender_raylib" -B "%MR_ROOT%\build\raylib" %RAY_FLAGS%
+if errorlevel 1 exit /b 1
+cmake --build "%MR_ROOT%\build\raylib" --config Release --parallel
+if errorlevel 1 exit /b 1
+echo [raylib] ok
+exit /b 0
 
 rem ---------------------------------------------------------------------------
 :b_tests
@@ -116,10 +289,21 @@ if errorlevel 1 exit /b 1
 set "PRESET=debug"
 if /i "%~2"=="index8" set "PRESET=index8"
 echo [tests] configuring preset "%PRESET%" ...
-cmake --preset "%PRESET%" -S "%MR_ROOT%\tests"
+pushd "%MR_ROOT%\tests" >nul
 if errorlevel 1 exit /b 1
-cmake --build --preset "%PRESET%"
-if errorlevel 1 exit /b 1
+cmake --preset "%PRESET%"
+if errorlevel 1 (
+    set "TEST_ERR=!ERRORLEVEL!"
+    popd >nul
+    exit /b !TEST_ERR!
+)
+cmake --build --preset "%PRESET%" --parallel
+if errorlevel 1 (
+    set "TEST_ERR=!ERRORLEVEL!"
+    popd >nul
+    exit /b !TEST_ERR!
+)
+popd >nul
 echo [tests] ok
 exit /b 0
 
@@ -127,23 +311,20 @@ rem ---------------------------------------------------------------------------
 :b_all
 call "%MR_ROOT%\scripts\mr_build.bat" assets
 if errorlevel 1 exit /b 1
-
 call "%MR_ROOT%\scripts\mr_build.bat" tests
 if errorlevel 1 echo [all] host tests skipped or failed - continuing
-
-rem DOS and Pico need toolchains that may not be installed. Report and carry on
-rem rather than failing the whole run.
 if not "%WATCOM%"=="" (
     call "%MR_ROOT%\scripts\mr_build.bat" dos
     if errorlevel 1 echo [all] DOS build failed
 ) else (
     echo [all] WATCOM not set - skipping DOS target
 )
-
 cmake --version >nul 2>nul
 if not errorlevel 1 (
-    call "%MR_ROOT%\scripts\mr_build.bat" pico game
-    if errorlevel 1 echo [all] Pico build failed or SDK not present
+    call "%MR_ROOT%\scripts\mr_build.bat" pico all
+    if errorlevel 1 echo [all] one or more Pico builds failed or SDK not present
+    call "%MR_ROOT%\scripts\mr_build.bat" raylib
+    if errorlevel 1 echo [all] Raylib build skipped - install raylib or pass raylib=PATH
 )
 echo [all] done
 exit /b 0
