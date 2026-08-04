@@ -116,6 +116,20 @@ set(MR_STRESS_DIRTY_RECT_MAX_H         16 CACHE STRING "Maximum dirty rect heigh
 set(MR_STRESS_DIRTY_FULL_THRESHOLD_PCT 70 CACHE STRING "Promote to a full redraw above this percentage of screen area")
 set(MR_STRESS_LACE_BLOCK_H             4  CACHE STRING "Row-group height for temporal presentation")
 
+# Older mr.bat revisions could write an empty command-line value into an
+# existing CMake cache.  CACHE defaults do not replace an already-cached empty
+# string, which would later produce -DMR_STRESS_PICO_LACE_BLOCK_H="" and an
+# invalid C expression.  Repair that stale state during configuration.
+if("${MR_STRESS_LACE_BLOCK_H}" STREQUAL "")
+    message(STATUS "MicroRender: resetting empty MR_STRESS_LACE_BLOCK_H cache value to 4")
+    set(MR_STRESS_LACE_BLOCK_H 4 CACHE STRING
+        "Row-group height for temporal presentation" FORCE)
+endif()
+if(NOT "${MR_STRESS_LACE_BLOCK_H}" MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR
+        "MR_STRESS_LACE_BLOCK_H must be a positive integer; got '${MR_STRESS_LACE_BLOCK_H}'")
+endif()
+
 option(MR_STRESS_ENABLE_TRIANGLES "Draw triangles in the stress scene" ON)
 option(MR_STRESS_CACHE_FIXED_BG   "Cache the static background in fixed-camera modes" OFF)
 option(MR_STRESS_FAST_METRICS     "Use the cheap metrics path" ON)

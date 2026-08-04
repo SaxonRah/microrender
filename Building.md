@@ -1,126 +1,146 @@
 # Building MicroRender
 
-Run commands from the repository root through `mr.bat`.
+Run commands from the repository root. PowerShell requires the explicit relative
+path:
 
-```bat
+```powershell
 .\mr.bat help
 ```
 
-All shipping frontends use a 320×240 RGB565 logical render target. Build-time
-settings are passed as `key=value` arguments; runtime settings use normal
-frontend arguments.
+All platform frontends use a fixed 320×240 RGB565 logical render target. Build
+settings use `key=value`; runtime frontend settings use their normal arguments.
+Both unquoted `key=value` and quoted `"key=value"` forms are accepted by the batch
+parser.
 
----
+## Source checkout and Raylib submodule
+
+Raylib is pinned as `third_party/raylib`.
+
+```powershell
+git clone --recurse-submodules https://github.com/SaxonRah/microrender.git
+cd microrender
+```
+
+For an existing checkout:
+
+```powershell
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+The Raylib build driver attempts the same initialization automatically when the
+submodule is absent and the source tree is a Git checkout.
 
 ## Host tests and benchmark
 
 Requires CMake and a C99 compiler.
 
-```bat
+```powershell
 .\mr.bat build tests
 .\mr.bat test
 .\mr.bat bench 200
 ```
 
-The normal suite is RGB565 and contains unit, shared-game, and deterministic
-fuzz tests. The optional `.\mr.bat test index8` remains useful as a legacy core-format
-compatibility check, but no shipping frontend uses it.
+`mr test` configures and executes six CTest entries: unit, shared game behavior,
+and four deterministic fuzz seeds. The default test build is RGB565. The optional
+legacy indexed-colour compatibility build is:
 
----
+```powershell
+.\mr.bat test index8
+```
+
+No shipping frontend uses the indexed host configuration.
 
 ## Raylib desktop frontend
 
-Raylib gives Windows, Linux, and macOS a real-time host frontend for the same
-320×240 RGB565 game and stress demos.
+The normal command uses the pinned submodule:
 
-Install Raylib so CMake can find it, set `CMAKE_PREFIX_PATH`, or supply a source
-checkout:
+```powershell
+.\mr.bat build raylib
+```
 
-```bat
+Resolution order in `microrender_raylib/CMakeLists.txt` is:
+
+1. explicit `raylib=PATH` / `MR_RAYLIB_PATH`
+2. `third_party/raylib`
+3. an installed CMake Raylib package
+4. an installed `raylib.h` plus Raylib library
+
+Examples:
+
+```powershell
+.\mr.bat build raylib demo=game mode=tiled tile=16 scale=3 fps=0 autoplay=OFF
+.\mr.bat build raylib demo=stress mode=lace sprites=1024 lace=4 fps=0
 .\mr.bat build raylib raylib=C:\src\raylib
 ```
 
-Build defaults are configurable:
+Runtime settings override compiled defaults:
 
-```bat
-.\mr.bat build raylib demo=game mode=tiled tile=16 scale=3 fps=0 autoplay=OFF
-.\mr.bat build raylib demo=stress mode=lace sprites=1024 lace=4 fps=0
-```
-
-Run-time options can override the compiled defaults:
-
-```bat
+```powershell
 .\mr.bat run raylib --demo game --mode raw --autoplay
 .\mr.bat run raylib --demo game --mode tiled --tile 16 --scale 4
 .\mr.bat run raylib --demo stress --mode dirtyrect --sprites 512
 .\mr.bat run raylib --demo stress --mode lace --sprites 1024 --lace-block 4
 ```
 
-Modes:
-
 | mode | behavior |
 | --- | --- |
 | `raw` | draw complete frame, upload complete RGB565 texture, loop |
-| `tiled` | upload each completed tile directly |
+| `tiled` | upload each completed tile |
 | `lace` | update alternating row groups |
-| `dirtyrect` | compare RGB565 frames and upload one bounding changed rectangle |
+| `dirtyrect` | compare complete frames and upload one bounding changed rectangle |
 
-Every mode renders FPS and average FPS in the shared HUD.
-
----
+Additional runtime options are `--fps N`, `--frames N`, and `--help`.
 
 ## 16-bit DOS
 
-Requires Open Watcom with `WATCOM` pointing to the install root.
+Requires Open Watcom with `WATCOM` pointing to its install root.
 
-```bat
-set WATCOM=C:\WATCOM
+```powershell
+$env:WATCOM = 'C:\WATCOM'
 .\mr.bat build dos mode=both tile=16 vsync=0
 ```
 
-Outputs:
+The build regenerates assets first. Both game and stress links include the shared
+`mr_strbuf.c` implementation used by the FPS HUD.
 
 | executable | demo | presentation |
 | --- | --- | --- |
 | `mrender.exe` | shared game | optimized direct tiled Mode X upload |
 | `mraw.exe` | shared game | raw full-frame staging and upload |
-| `mstress.exe` | stress | optimized direct tiled upload |
+| `mstress.exe` | stress | optimized direct tiled Mode X upload |
 | `msraw.exe` | stress | raw full-frame staging and upload |
 
-Run them through DOSBox:
+Run through DOSBox:
 
-```bat
+```powershell
 .\mr.bat run dos /auto
 .\mr.bat run dosraw /auto
 .\mr.bat run stress 512 2100
 .\mr.bat run stressraw 512 2100
 ```
 
-The shared renderer remains 320×240 RGB565. Standard VGA is palettized, so the
-final Mode X upload converts RGB565 to a fixed RGB332 palette. Raw mode uses an
-Open Watcom huge-memory 150 KiB frame; optimized mode needs only the configured
-small tile.
+Build variants:
 
-Build settings:
-
-```bat
+```powershell
 .\mr.bat build dos mode=raw tile=16 vsync=0
 .\mr.bat build dos mode=tiled tile=8 vsync=1
 .\mr.bat build dos mode=both tile=16 vsync=0
 ```
 
-`tile` changes the renderer working-strip height. `vsync` changes the default;
-`/vsync` and `/novsync` can still override it at runtime.
-
----
+`tile` sets the RGB565 working-strip height. `vsync` sets the compiled default;
+`/vsync` and `/novsync` can override it at runtime. Standard VGA is palettized,
+so the Mode X frontend converts shared RGB565 output to a fixed RGB332 palette.
 
 ## Pico 2 / RP2350
 
-Requires Pico SDK, ARM GCC, CMake, and Ninja.
+Requires the Pico SDK, ARM GCC, CMake, Ninja, and Python. The repository defaults
+to Pico SDK 2.2.0, toolchain `14_2_Rel1`, and the
+`pimoroni_pico_plus2_rp2350` board definition.
 
-Common presets:
+### Presets
 
-```bat
+```powershell
 .\mr.bat build pico game
 .\mr.bat build pico game-raw
 .\mr.bat build pico stress-visible
@@ -131,21 +151,19 @@ Common presets:
 .\mr.bat build pico all
 ```
 
-`.\mr.bat build pico all` configures and builds every Pico preset. Pico command-line
-builds always run from `microrender\`, use the `Ninja` generator and the Pico
-ARM GCC toolchain, and automatically remove a stale build directory previously
-configured with Visual Studio/MSVC. This makes the command safe to run from an
-ordinary PowerShell, Developer PowerShell, or VS Code terminal.
+`pico all` builds the seven presets above. The driver always configures from
+`microrender/`, forces Ninja, and puts the Pico ARM GCC toolchain first on `PATH`.
+Before configuring, it validates the cached generator, compiler, source directory,
+and cache directory. A moved checkout or a cache made by Visual Studio/MSVC is
+deleted and configured again automatically.
 
-Override preset settings on the same command line:
+### Command-line overrides
 
-```bat
+```powershell
 .\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
 .\mr.bat build pico stress-visible tile=240 sprites=1024 pipeline=ON serial=ON
 .\mr.bat build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
 ```
-
-Friendly settings:
 
 | key | CMake option |
 | --- | --- |
@@ -159,48 +177,92 @@ Friendly settings:
 | `hud=N` | `MR_STRESS_HUD_MODE` |
 | `lace=N` | `MR_STRESS_LACE_BLOCK_H` |
 | `target=N` | `MR_STRESS_TARGET_FPS` |
-| `serial=ON/OFF` | `MR_STRESS_PICO_SERIAL` and `MR_PICO_GAME_SERIAL` |
+| `serial=ON/OFF` | stress/game verbose USB logs |
 | `diag=ON/OFF` | `MR_STRESS_PICO_DIAG` |
 
-Any cache variable beginning with `MR_` can also be passed through directly:
+Any cache variable beginning with `MR_` can be passed directly:
 
-```bat
+```powershell
 .\mr.bat build pico stress-dirtyrect MR_STRESS_DIRTY_MERGE_GAP=6 MR_STRESS_DIRTY_FULL_THRESHOLD_PCT=80
+.\mr.bat build pico game MR_PICO_SCREENSHOT=OFF
 ```
 
-Raw Pico modes intentionally require `tile=240` and a full 240-row view. CMake
-rejects shorter raw configurations because they would no longer represent the
-requested clear-frame/draw-everything/send-complete-frame loop.
+Raw game mode requires `MR_TILE_H=240`. Raw stress mode requires both
+`MR_TILE_H=MR_VIEW_H` and a complete 240-row view. CMake rejects configurations
+that would stop being the intended clear/draw-complete-frame/send baseline.
 
-The generated `.uf2` is in the preset's build directory. Copy it to the Pico in
-BOOTSEL mode.
+### VS Code flash/debug build directory
+
+Append `vscode` to configure one selected preset into `microrender/build`:
+
+```powershell
+.\mr.bat build pico stress-lace sprites=1024 lace=4 hud=2 vscode
+```
+
+The repository's VS Code project then uses:
+
+```text
+microrender/build/microrender.elf
+microrender/build/microrender.uf2
+```
+
+Without `vscode`, each preset uses the `binaryDir` declared in
+`microrender/CMakePresets.json`.
+
+### USB screenshot capture
+
+`MR_PICO_SCREENSHOT` defaults to `ON` for every Pico app and automatically enables
+USB stdio. `serial=ON` is not required; it only enables FPS/debug text.
+
+```powershell
+py -m pip install pyserial pillow
+py -u .\microrender\tools_capture_pico_screenshot.py COM5 .\pico2_screenshot.png --timeout 30
+```
+
+Close VS Code's serial monitor or any other program holding the port. The capture
+script retries `SCREENSHOT` while USB enumerates, waits for `MRSHOT1`, receives the
+exact RGB565 byte count, converts to RGB888, and writes PNG. It accepts `--baud`
+and `--timeout`; USB CDC ignores the nominal wire baud value.
+
+The firmware supports `SCREENSHOT`, `SHOT`, `PING`, and `HELP`. Captures are newly
+rendered complete logical frames and reuse the existing application buffer.
 
 See [PICO_PRESENTATION_MODES.md](PICO_PRESENTATION_MODES.md).
 
----
-
 ## Assets
 
-```bat
+```powershell
 .\mr.bat build assets
 ```
 
-Regenerates the MRP package and embedded C data. CI builds the pack twice and
-requires byte-identical output and a valid MRP header.
+This regenerates `shared/generated/GAME.MRP`, its generated header, and embedded C
+bytes from `shared/assets/project.json`. CI builds the pack twice and requires
+byte-identical output plus a valid `MRP1` header.
 
----
+## Build everything available locally
 
-## Everything available locally
-
-```bat
+```powershell
 .\mr.bat build all
 ```
 
-This always builds assets and host tests, then attempts DOS, Pico, and Raylib
-when their toolchains are available.
+Behavior is intentionally explicit:
 
-```bat
+- assets are mandatory
+- host tests are attempted and failures are remembered
+- DOS is built only when `WATCOM` is set
+- Pico and Raylib are attempted when CMake is available
+- Raylib initializes its submodule when needed
+- all remaining targets continue after a failure
+- the final process exits nonzero if any attempted target failed
+
+A missing Pico SDK is therefore a failure, not a silent skip. A missing `WATCOM`
+environment variable is the one normal platform skip.
+
+## Clean
+
+```powershell
 .\mr.bat clean
 ```
 
-removes build output.
+This removes generated build output; it does not remove source assets or the
+Raylib submodule checkout.

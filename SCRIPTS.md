@@ -1,15 +1,14 @@
 # Unified command-line scripts
 
-`mr.bat` is the single public entry point. Build variants are arguments instead
-of separate source-patching scripts. Pico and Raylib builds also accept any
-`MR_...=value` CMake cache variable for advanced settings not covered by a
-friendly alias.
+`mr.bat` is the public entry point for build, run, test, benchmark, and clean
+operations. Variant settings are command-line arguments rather than scripts that
+rewrite CMake or C sources.
 
 ```text
 .\mr.bat build assets
 .\mr.bat build tests
 .\mr.bat build dos [mode=raw|tiled|both] [tile=N] [vsync=0|1]
-.\mr.bat build pico [preset|all] [key=value ...]
+.\mr.bat build pico [preset|all] [key=value ...] [vscode]
 .\mr.bat build raylib [key=value ...]
 .\mr.bat build all
 
@@ -19,31 +18,60 @@ friendly alias.
 .\mr.bat run stressraw [sprites] [frames] [args...]
 .\mr.bat run raylib [args...]
 
-.\mr.bat test
+.\mr.bat test [index8]
 .\mr.bat bench [frames]
 .\mr.bat clean
 ```
+
+## Option parsing
+
+The worker accepts both spellings below:
+
+```powershell
+.\mr.bat build pico stress-lace sprites=1024 sys=300000
+.\mr.bat build pico stress-lace "sprites=1024" "sys=300000"
+```
+
+This matters because `cmd.exe` can expose an unquoted equals expression to a
+called batch file as two parameters. `scripts/mr_build.bat` detects whether a
+setting occupied one or two parameters and shifts accordingly. Empty and unknown
+settings fail immediately instead of becoming empty C preprocessor definitions.
+
+Pico and Raylib additionally pass any `MR_...=value` cache variable through to
+CMake. DOS accepts only its documented aliases.
 
 ## Files
 
 | file | role |
 | --- | --- |
-| `mr.bat` | command dispatcher and help |
-| `scripts/mr_build.bat` | assets, tests, DOS, Pico, and Raylib configuration/build |
-| `scripts/mr_run.bat` | DOSBox, Raylib, ctest, and benchmark launcher |
-| `scripts/mr_tools.bat` | tool discovery |
+| `mr.bat` | repository-root validation, command dispatch, and help |
+| `scripts/mr_build.bat` | assets, tests, DOS, Pico, Raylib, and aggregate builds |
+| `scripts/mr_run.bat` | DOSBox, Raylib, CTest, and benchmark launcher |
+| `scripts/mr_tools.bat` | CMake, Open Watcom, and DOSBox discovery |
 | `scripts/mr_clean.bat` | build-output cleanup |
-| `microrender_dos/build_watcom*.bat` | low-level Open Watcom compiler/linker invocations |
+| `scripts/mr_preset_flags.py` | reads Pico preset cache variables and binary directories |
+| `microrender/pico_env_auto.bat` | Pico SDK/toolchain/Ninja environment discovery |
+| `microrender_dos/build_watcom*.bat` | low-level 16-bit compiler/linker commands |
+| `microrender/tools_capture_pico_screenshot.py` | USB RGB565 screenshot receiver and PNG writer |
 
-## Examples
+## Build examples
 
-```bat
+```powershell
 .\mr.bat build dos mode=both tile=16 vsync=0
 .\mr.bat build pico game-raw
 .\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4
+.\mr.bat build pico stress-lace sprites=1024 lace=4 vscode
 .\mr.bat build pico all
+.\mr.bat build raylib
 .\mr.bat build raylib raylib=C:\src\raylib demo=game mode=tiled tile=16 scale=3
+```
 
+The Raylib path is an override. With no override, the build uses the pinned
+`third_party/raylib` submodule and initializes it automatically when possible.
+
+## Run examples
+
+```powershell
 .\mr.bat run dos /auto
 .\mr.bat run dosraw /auto
 .\mr.bat run stress 1024 2100
@@ -52,17 +80,52 @@ friendly alias.
 .\mr.bat run raylib --demo stress --mode dirtyrect --sprites 512
 ```
 
+The run driver forwards Raylib arguments unchanged. For DOS stress, the first two
+positional values become `/sprites` and `/frames`; remaining values are forwarded
+to the DOS executable.
+
+## Pico preset directories
+
+Normal preset builds use the `binaryDir` declared in
+`microrender/CMakePresets.json`. The final `vscode` token instead configures the
+selected preset into `microrender/build` so the checked-in VS Code flash/debug
+configuration points at the correct ELF/UF2.
+
+Before configuration, the build driver deletes a Pico cache when any of these no
+longer match:
+
+- Ninja generator
+- `arm-none-eabi-gcc`
+- current absolute source directory
+- current absolute cache/build directory
+
+That makes a checkout safe to move without manually hunting stale CMake caches.
+
+## Raylib submodule behavior
+
+When no `raylib=PATH` override is supplied, the build checks
+`third_party/raylib/CMakeLists.txt`. If missing, it runs a shallow recursive
+submodule update first, retries a full pinned checkout if needed, and fails with
+manual recovery commands if initialization still fails.
+
+## Aggregate build behavior
+
+`.\mr.bat build all` continues through independent platform failures and reports
+a combined failure at the end. Assets are mandatory. DOS is skipped when
+`WATCOM` is unset. Missing or broken Pico/Raylib prerequisites make the aggregate
+command fail rather than printing a false success.
+
 ## DOSBox cycles
 
 `cycles=max` measures the host rather than a historical PC. Pin
 `MR_DOSBOX_CYCLES` for reproducible comparisons:
 
-```bat
-set MR_DOSBOX_CYCLES=fixed 12000
+```powershell
+$env:MR_DOSBOX_CYCLES = 'fixed 12000'
 .\mr.bat run stress 512 2100
 ```
 
-Approximate examples:
+Approximate examples used by the script comments:
 
 | intended class | value |
 | --- | --- |
@@ -70,3 +133,14 @@ Approximate examples:
 | 486DX2/66 | `fixed 12000` |
 | Pentium 100 | `fixed 30000` |
 | host-unbounded | `max` |
+
+## Important environment overrides
+
+| variable | purpose |
+| --- | --- |
+| `WATCOM` | Open Watcom installation root |
+| `DOSBOX_EXE` | full path to DOSBox-X or DOSBox executable |
+| `MR_DOSBOX_CYCLES` | DOSBox CPU cycle setting |
+| `PICO_SDK_PATH` | Pico SDK root, normally filled by `pico_env_auto.bat` |
+| `PICO_TOOLCHAIN_PATH` | Pico ARM GCC toolchain root |
+| `PICO_BOARD` | board name; defaults to `pimoroni_pico_plus2_rp2350` |

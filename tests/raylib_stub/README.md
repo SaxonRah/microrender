@@ -1,10 +1,25 @@
 # Raylib CI shim
 
-This is a deliberately tiny, headless subset of the Raylib API used only by
-MicroRender's CI. It verifies that the desktop frontend compiles and that its
-raw, tiled, lace, dirty-rectangle, game, and stress loops can execute for a
-finite number of frames without requiring a window server or GPU.
+This directory is a deliberately small, headless subset of the Raylib API used
+only by MicroRender's automated frontend check.
 
-It is **not** a replacement for Raylib and is never selected by normal
-`.\mr.bat build raylib` commands. Real desktop builds must use an installed Raylib or
-pass `raylib=C:\path\to\raylib`.
+CI points `MR_RAYLIB_PATH` here, compiles the real
+`microrender_raylib/main.c`, and executes finite-frame runs for:
+
+- game `raw`
+- game `tiled`
+- game `lace`
+- game `dirtyrect`
+- stress `tiled`
+
+The shim provides no real window, GPU, input device, or presentation timing. It
+checks that the desktop frontend compiles and that each control-flow path can run
+without crashing.
+
+It is **not** selected by normal `.\mr.bat build raylib` commands. Normal builds
+prefer the pinned `third_party/raylib` submodule. An installed Raylib package or
+an explicit override remains supported:
+
+```powershell
+.\mr.bat build raylib raylib=C:\path\to\raylib
+```
