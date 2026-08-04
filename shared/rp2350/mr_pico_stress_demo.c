@@ -5,6 +5,7 @@
 #include "hardware/regs/clocks.h"
 #include "hardware/timer.h"
 #include "mr_pico_ili9341.h"
+#include "mr_pico_screenshot.h"
 #include "mr_stress_test.h"
 #include "pico/stdlib.h"
 #include <stdarg.h>
@@ -209,6 +210,7 @@ static int stress_dirtyrect_src_h;
 #endif
 static gfx_renderer_t renderer;
 static mr_stress_test_t stress;
+static mr_pico_screenshot_t screenshot_service;
 static mr_pico_ili9341_t lcd = {
     .spi = MR_LCD_SPI,
     .dma_chan = 0u,
@@ -354,6 +356,11 @@ static void stress_draw_pico_diag(gfx_renderer_t *r) {
 static void draw_stress_scene(gfx_renderer_t *r, void *user) {
   mr_stress_render(r, (mr_stress_test_t *)user);
   stress_draw_pico_diag(r);
+}
+
+static void screenshot_wait_for_display(void *user) {
+  (void)user;
+  mr_pico_ili9341_flush_wait(&renderer, &lcd);
 }
 
 static int stress_usb_ready(void) {
@@ -770,13 +777,13 @@ static void stress_reset_timing(void) {
   mr_stress_set_fps10(&stress, 0ul, 0ul);
 }
 
-static void stress_draw_lcdtest_frame(unsigned long frame) {
+static void stress_draw_lcdtest_frame(gfx_renderer_t *r, unsigned long frame) {
   char buf[80];
   int x;
   int y;
   int bar;
 
-  gfx_begin_tile(&renderer, 0, MR_VIEW_H);
+  gfx_begin_tile(r, 0, MR_VIEW_H);
 
   for (y = 0; y < MR_VIEW_H; ++y) {
     gfx_color_t c;
@@ -787,15 +794,20 @@ static void stress_draw_lcdtest_frame(unsigned long frame) {
     else
       c = GFX_RGB565(80, 20, 30 + ((int)frame & 31));
     for (x = 0; x < MR_SCREEN_W; ++x)
-      renderer.tile[y * MR_SCREEN_W + x] = c;
+      r->tile[y * MR_SCREEN_W + x] = c;
   }
 
   bar = (int)(frame % (unsigned long)(MR_SCREEN_W + 64)) - 64;
-  gfx_fill_rect(&renderer, bar, 96, 64, 48, GFX_RGB565_WHITE);
+  gfx_fill_rect(r, bar, 96, 64, 48, GFX_RGB565_WHITE);
   stress_format_lcdtest_line1(buf, (int)sizeof(buf));
-  gfx_draw_text5x7(&renderer, 2, 2, buf, GFX_RGB565_WHITE, 1);
+  gfx_draw_text5x7(r, 2, 2, buf, GFX_RGB565_WHITE, 1);
   stress_format_lcdtest_line2(buf, (int)sizeof(buf));
-  gfx_draw_text5x7(&renderer, 2, 12, buf, GFX_RGB565_WHITE, 1);
+  gfx_draw_text5x7(r, 2, 12, buf, GFX_RGB565_WHITE, 1);
+}
+
+static void draw_lcdtest_scene(gfx_renderer_t *r, void *user) {
+  (void)user;
+  stress_draw_lcdtest_frame(r, frame_counter);
 }
 
 static int stress_can_fullframe_pipeline(void) {
@@ -876,6 +888,10 @@ static void stress_lcdtest_loop(void) {
 
   gfx_init(&renderer, MR_SCREEN_W, MR_VIEW_H, stress_prev_frame, MR_VIEW_H,
            mr_pico_ili9341_flush, &lcd);
+  mr_pico_screenshot_init(&screenshot_service, MR_SCREEN_W, MR_VIEW_H,
+                          stress_prev_frame, MR_VIEW_H, GFX_RGB565_BLACK,
+                          draw_lcdtest_scene, 0, screenshot_wait_for_display,
+                          0);
 
   stress_reset_timing();
   for (;;) {
@@ -883,7 +899,7 @@ static void stress_lcdtest_loop(void) {
     uint32_t flush_t0;
 
     frame_t0 = stress_time_us();
-    stress_draw_lcdtest_frame(frame_counter);
+    stress_draw_lcdtest_frame(&renderer, frame_counter);
     flush_t0 = stress_time_us();
     gfx_flush_tile(&renderer);
     stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
@@ -892,6 +908,7 @@ static void stress_lcdtest_loop(void) {
     stress_frame_us_accum += (uint32_t)(stress_time_us() - frame_t0);
     ++stress_stat_window_frames;
     ++frame_counter;
+    (void)mr_pico_screenshot_poll(&screenshot_service);
 
     now = to_ms_since_boot(get_absolute_time());
     if ((uint32_t)(now - last_fps_ms) >= MR_STRESS_PICO_PRINT_MS) {
@@ -1003,9 +1020,6 @@ void mr_pico_stress_demo_main(void) {
   uint32_t now;
   int clock_ok;
 
-#if MR_STRESS_PICO_SERIAL
-  stdio_init_all();
-#endif
   stress_wait_for_usb_if_requested();
 
   clock_ok = 1;
@@ -1068,6 +1082,10 @@ void mr_pico_stress_demo_main(void) {
   cfg.features &= ~MR_STRESS_FEATURE_TRIANGLES;
 #endif
   mr_stress_init(&stress, &cfg);
+  mr_pico_screenshot_init(&screenshot_service, MR_SCREEN_W, MR_VIEW_H,
+                          tile_buffer_a, MR_TILE_H, GFX_RGB565_BLACK,
+                          draw_stress_scene, &stress,
+                          screenshot_wait_for_display, 0);
 
   stress_present_this_frame = 1;
   stress_dirty_this_frame = 0;
@@ -1143,6 +1161,7 @@ void mr_pico_stress_demo_main(void) {
     stress_frame_us_accum += (uint32_t)(stress_time_us() - frame_t0);
     ++stress_stat_window_frames;
     ++frame_counter;
+    (void)mr_pico_screenshot_poll(&screenshot_service);
 
     now = to_ms_since_boot(get_absolute_time());
     if ((uint32_t)(now - last_fps_ms) >= MR_STRESS_PICO_PRINT_MS) {

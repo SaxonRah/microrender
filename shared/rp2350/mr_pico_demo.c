@@ -4,13 +4,13 @@
 #include "mr_autodemo.h"
 #include "mr_game_demo.h"
 #include "mr_pico_ili9341.h"
+#include "mr_pico_screenshot.h"
 
 #include "hardware/timer.h"
 #include "pico/stdlib.h"
 
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 
 #ifndef MR_SCREEN_W
 #define MR_SCREEN_W 320
@@ -39,6 +39,7 @@ static gfx_color_t tile_buffer_b[MR_SCREEN_W * MR_TILE_H];
 #endif
 static gfx_renderer_t renderer;
 static mr_game_demo_t game_demo;
+static mr_pico_screenshot_t screenshot_service;
 
 static mr_pico_ili9341_t lcd = {
     .spi = MR_LCD_SPI,
@@ -60,10 +61,6 @@ static unsigned long frame_counter;
 static uint32_t start_fps_ms;
 static uint32_t last_fps_ms;
 static unsigned long last_fps_frame;
-#if MR_PICO_GAME_SERIAL
-static char usb_cmd[40];
-static unsigned usb_cmd_len;
-#endif
 
 static void draw_game_scene(gfx_renderer_t *r, void *user) {
   mr_game_demo_t *demo;
@@ -71,92 +68,11 @@ static void draw_game_scene(gfx_renderer_t *r, void *user) {
   mr_game_demo_render(demo, r);
 }
 
-#if MR_PICO_GAME_SERIAL
-static void screenshot_stream_flush(gfx_renderer_t *r, int x, int y, int w,
-                                    int h, const gfx_color_t *pixels,
-                                    void *user) {
-  int row;
-  int stride;
-
+static void screenshot_wait_for_display(void *user) {
   (void)user;
-  if (!pixels || w <= 0 || h <= 0)
-    return;
-  if (x != 0 || w != MR_SCREEN_W || y < 0 || y + h > MR_SCREEN_H)
-    return;
-
-  stride = r ? r->tile_stride : w;
-  for (row = 0; row < h; ++row) {
-    fwrite((const void *)(pixels + row * stride), sizeof(gfx_color_t),
-           (size_t)w, stdout);
-  }
-}
-
-static void send_screenshot(void) {
-  gfx_renderer_t cap;
-  size_t bytes;
-
-  bytes = (size_t)MR_SCREEN_W * (size_t)MR_SCREEN_H * sizeof(gfx_color_t);
-
   mr_pico_ili9341_flush_wait(&renderer, &lcd);
-
-  /* The renderer flushes full-width tiles from top to bottom, so the screenshot
-     can be streamed after its header instead of reserving a third 150 KiB
-     framebuffer in RP2350 SRAM. */
-  printf("MRSHOT1 %d %d %lu\n", MR_SCREEN_W, MR_SCREEN_H,
-         (unsigned long)bytes);
-  fflush(stdout);
-
-  gfx_init(&cap, MR_SCREEN_W, MR_SCREEN_H, tile_buffer_a, MR_TILE_H,
-           screenshot_stream_flush, 0);
-  gfx_render_tiled(&cap, draw_game_scene, &game_demo, GFX_RGB565_BLACK);
-  fflush(stdout);
 }
 
-static int usb_line_ready(const char *line) {
-  if (strcmp(line, "SCREENSHOT") == 0 || strcmp(line, "SHOT") == 0) {
-    return 1;
-  }
-
-  if (strcmp(line, "HELP") == 0 || strcmp(line, "?") == 0) {
-    printf("commands: SCREENSHOT, SHOT, HELP\n");
-    return 0;
-  }
-
-  if (line[0] != '\0') {
-    printf("unknown command: %s\n", line);
-  }
-
-  return 0;
-}
-
-static int poll_usb_screenshot_request(void) {
-  int ch;
-
-  for (;;) {
-    ch = getchar_timeout_us(0);
-    if (ch == PICO_ERROR_TIMEOUT) {
-      break;
-    }
-
-    if (ch == '\r' || ch == '\n') {
-      usb_cmd[usb_cmd_len] = '\0';
-      usb_cmd_len = 0;
-      if (usb_line_ready(usb_cmd)) {
-        return 1;
-      }
-    } else if (ch >= 32 && ch <= 126) {
-      if (usb_cmd_len + 1u < sizeof(usb_cmd)) {
-        usb_cmd[usb_cmd_len++] = (char)ch;
-      } else {
-        usb_cmd_len = 0;
-      }
-    }
-  }
-
-  return 0;
-}
-
-#endif /* MR_PICO_GAME_SERIAL */
 
 void mr_pico_demo_main(void) {
   uint32_t now;
@@ -171,7 +87,7 @@ void mr_pico_demo_main(void) {
   printf("screen: %dx%d RGB565 tile_h=%d spi=%u Hz present=%s\n",
          MR_SCREEN_W, MR_SCREEN_H, MR_TILE_H, (unsigned)MR_LCD_SPI_BAUD,
          MR_GAME_PRESENT_MODE == 0 ? "raw-serialized" : "dma-pipelined");
-  printf("usb command: SCREENSHOT\n");
+  printf("usb screenshot service: SCREENSHOT, SHOT, PING, HELP\n");
 #endif
 
   mr_pico_ili9341_init(&lcd);
@@ -185,6 +101,10 @@ void mr_pico_demo_main(void) {
 #endif
 
   mr_game_demo_init(&game_demo, MR_SCREEN_W, MR_SCREEN_H);
+  mr_pico_screenshot_init(&screenshot_service, MR_SCREEN_W, MR_SCREEN_H,
+                          tile_buffer_a, MR_TILE_H, GFX_RGB565_BLACK,
+                          draw_game_scene, &game_demo,
+                          screenshot_wait_for_display, 0);
   mr_autodemo_reset();
 
   frame_counter = 0;
@@ -208,11 +128,7 @@ void mr_pico_demo_main(void) {
 
     ++frame_counter;
 
-#if MR_PICO_GAME_SERIAL
-    if (poll_usb_screenshot_request()) {
-      send_screenshot();
-    }
-#endif
+    (void)mr_pico_screenshot_poll(&screenshot_service);
 
     now = to_ms_since_boot(get_absolute_time());
     if ((uint32_t)(now - last_fps_ms) >= 500u) {

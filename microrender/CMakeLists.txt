@@ -94,7 +94,8 @@ set(MR_PICO_PERI_PLL_KHZ 0      CACHE STRING "Peripheral PLL in kHz; 0 derives i
 option(MR_PICO_PERI_FROM_SYS  "Drive the peripheral clock from the system clock" ON)
 option(MR_PICO_CLOCK_REQUIRED "Fail at runtime if the requested system clock cannot be set" OFF)
 option(MR_PICO_FRAME_PIPELINE "Overlap tile rasterization with LCD DMA using a second tile buffer" ON)
-option(MR_PICO_GAME_SERIAL "Enable game USB FPS logs and screenshot commands" OFF)
+option(MR_PICO_SCREENSHOT "Enable the shared USB RGB565 screenshot service for every Pico app" ON)
+option(MR_PICO_GAME_SERIAL "Enable game USB FPS logs" OFF)
 
 # ---------------------------------------------------------------------------
 # stress test configuration (ignored when MR_APP is GAME)
@@ -246,6 +247,7 @@ set(MR_SOURCES
     "${MR_SHARED_SRC}/mr_strbuf.c"
     "${MR_SHARED_SRC}/mr_autodemo.c"
     "${MR_SHARED_RP2350}/mr_pico_ili9341.c"
+    "${MR_SHARED_RP2350}/mr_pico_screenshot.c"
     "${MR_GENERATED_C}"
 )
 
@@ -268,6 +270,16 @@ if(EXISTS "${MR_SHARED_SRC}/gfx_pack.c")
 endif()
 
 add_executable(microrender ${MR_SOURCES})
+
+# USB CDC is enabled once for the whole firmware. Screenshot support is
+# independent of verbose FPS logging, so every Pico application can answer the
+# same SCREENSHOT command without enabling benchmark output.
+set(MR_PICO_USB_STDIO OFF)
+if(MR_PICO_SCREENSHOT OR
+   (MR_APP STREQUAL "STRESS" AND MR_STRESS_PICO_SERIAL) OR
+   (MR_APP STREQUAL "GAME" AND MR_PICO_GAME_SERIAL))
+    set(MR_PICO_USB_STDIO ON)
+endif()
 
 target_include_directories(microrender PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}"
@@ -304,6 +316,8 @@ target_compile_definitions(microrender PRIVATE
     MR_PICO_PERI_FROM_SYS=$<BOOL:${MR_PICO_PERI_FROM_SYS}>
     MR_PICO_CLOCK_REQUIRED=$<BOOL:${MR_PICO_CLOCK_REQUIRED}>
     MR_PICO_FRAME_PIPELINE=$<BOOL:${MR_PICO_FRAME_PIPELINE}>
+    MR_PICO_SCREENSHOT=$<BOOL:${MR_PICO_SCREENSHOT}>
+    MR_PICO_USB_STDIO=$<BOOL:${MR_PICO_USB_STDIO}>
     MR_PICO_GAME_SERIAL=$<BOOL:${MR_PICO_GAME_SERIAL}>
     MR_GAME_PRESENT_MODE=${MR_GAME_PRESENT_MODE}
 )
@@ -369,8 +383,7 @@ target_link_libraries(microrender
     hardware_clocks
 )
 
-if((MR_APP STREQUAL "STRESS" AND MR_STRESS_PICO_SERIAL) OR
-   (MR_APP STREQUAL "GAME" AND MR_PICO_GAME_SERIAL))
+if(MR_PICO_USB_STDIO)
     pico_enable_stdio_usb(microrender 1)
 else()
     pico_enable_stdio_usb(microrender 0)
@@ -381,6 +394,7 @@ pico_add_extra_outputs(microrender)
 # ---------------------------------------------------------------------------
 
 message(STATUS "MicroRender: app=${MR_APP} board=${PICO_BOARD}")
+message(STATUS "MicroRender: USB screenshot=${MR_PICO_SCREENSHOT} USB stdio=${MR_PICO_USB_STDIO}")
 if(MR_APP STREQUAL "STRESS")
     message(STATUS "MicroRender: mode=${MR_STRESS_MODE} (flush=${MR_STRESS_FLUSH_MODE}, "
                    "fixed_camera=${MR_STRESS_FIXED_CAMERA}) sprites=${MR_STRESS_SPRITES}")
