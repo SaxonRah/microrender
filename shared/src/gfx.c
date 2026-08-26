@@ -1,6 +1,19 @@
 #include "gfx.h"
 #include <string.h>
 
+#if GFX_FAST_WORD_COPY && (GFX_COLOR_FORMAT == GFX_COLOR_FORMAT_RGB565)
+#include <stdint.h>
+/* Two RGB565 pixels per aligned 32-bit access. The pixel buffers are arrays of
+   gfx_color_t, so reading them through a wider lvalue is a strict-aliasing
+   violation unless the wide type is explicitly permitted to alias. GCC and
+   Clang provide that; other compilers fall back to the element loop rather
+   than gamble on -fstrict-aliasing miscompiling a blitter. */
+#if defined(__GNUC__) || defined(__clang__)
+#define GFX_HAVE_WORD_PIXEL_OPS 1
+typedef uint32_t __attribute__((may_alias)) gfx_word_t;
+#endif
+#endif
+
 static int gfx_max_int(int a, int b) { return a > b ? a : b; }
 static int gfx_min_int(int a, int b) { return a < b ? a : b; }
 
@@ -11,6 +24,43 @@ GFX_INLINE void gfx_fast_fill16(gfx_color_t GFX_PTR *dst, int count,
 #if GFX_COLOR_FORMAT == GFX_COLOR_FORMAT_INDEX8 &&                             \
     !defined(GFX_NO_LIBC_PIXEL_OPS)
   memset((void *)dst, (int)((unsigned char)color), (size_t)count);
+#elif defined(GFX_HAVE_WORD_PIXEL_OPS)
+  {
+    gfx_word_t pair =
+        (gfx_word_t)(((gfx_word_t)color << 16) | (gfx_word_t)color);
+    gfx_word_t *d32;
+    int i = 0;
+    int words;
+    int w = 0;
+
+    /* Lead-in pixel when the run starts on an odd address. Runs begin at an
+       arbitrary x, so this is common, not an edge case. */
+    if ((((uintptr_t)dst) & 3u) != 0u) {
+      dst[0] = color;
+      if (count == 1)
+        return;
+      i = 1;
+    }
+
+    words = (count - i) >> 1;
+    d32 = (gfx_word_t *)(void *)(dst + i);
+    for (; w + 7 < words; w += 8) {
+      d32[w + 0] = pair;
+      d32[w + 1] = pair;
+      d32[w + 2] = pair;
+      d32[w + 3] = pair;
+      d32[w + 4] = pair;
+      d32[w + 5] = pair;
+      d32[w + 6] = pair;
+      d32[w + 7] = pair;
+    }
+    for (; w < words; ++w)
+      d32[w] = pair;
+
+    i += words << 1;
+    for (; i < count; ++i)
+      dst[i] = color;
+  }
 #else
   {
     int i = 0;
@@ -45,6 +95,50 @@ GFX_INLINE void gfx_fast_copy16(gfx_color_t GFX_PTR *dst,
 #if !defined(GFX_NO_LIBC_PIXEL_OPS) && !defined(__WATCOMC__) &&          \
     !(defined(GFX_PLATFORM_RP2350) && GFX_PLATFORM_RP2350)
   memcpy((void *)dst, (const void *)src, (size_t)count * sizeof(gfx_color_t));
+#elif defined(GFX_HAVE_WORD_PIXEL_OPS)
+  {
+    int i = 0;
+
+    /* Both sides can only be word-aligned together when they agree on odd/even
+       address parity. Sprite pixel pools and tile rows frequently do, because
+       runs are copied to the same x parity they were built at; when they do
+       not, fall through to the element loop rather than shift-merging, which
+       costs more than it saves on a single-issue core. */
+    if ((((uintptr_t)dst ^ (uintptr_t)src) & 3u) == 0u) {
+      gfx_word_t *d32;
+      const gfx_word_t *s32;
+      int words;
+      int w = 0;
+
+      if ((((uintptr_t)dst) & 3u) != 0u) {
+        dst[0] = src[0];
+        if (count == 1)
+          return;
+        i = 1;
+      }
+
+      words = (count - i) >> 1;
+      d32 = (gfx_word_t *)(void *)(dst + i);
+      s32 = (const gfx_word_t *)(const void *)(src + i);
+      for (; w + 7 < words; w += 8) {
+        d32[w + 0] = s32[w + 0];
+        d32[w + 1] = s32[w + 1];
+        d32[w + 2] = s32[w + 2];
+        d32[w + 3] = s32[w + 3];
+        d32[w + 4] = s32[w + 4];
+        d32[w + 5] = s32[w + 5];
+        d32[w + 6] = s32[w + 6];
+        d32[w + 7] = s32[w + 7];
+      }
+      for (; w < words; ++w)
+        d32[w] = s32[w];
+
+      i += words << 1;
+    }
+
+    for (; i < count; ++i)
+      dst[i] = src[i];
+  }
 #else
   {
     int i = 0;
@@ -560,16 +654,18 @@ static void gfx_blit_sprite_rle_rowstart_fast(
   int sy;
   int ax0;
   int ax1;
+  gfx_color_t GFX_PTR *dst_row;
 
   if (!r || !s || !r->tile || !s->pixels || !s->runs || !s->row_start)
     return;
 
   if (!clipped) {
-    for (sy = 0; sy < s->height; ++sy) {
+    /* One multiply for the sprite instead of one per row. At 1024 sprites of
+       16 rows that is 16k multiplies per frame turned into 16k adds. */
+    dst_row = r->tile + (y - r->tile_y) * r->tile_stride + (x - r->tile_x);
+    for (sy = 0; sy < s->height; ++sy, dst_row += r->tile_stride) {
       int first = (int)s->row_start[sy];
       int last = (int)s->row_start[sy + 1];
-      gfx_color_t GFX_PTR *dst_row =
-          r->tile + (y + sy - r->tile_y) * r->tile_stride + (x - r->tile_x);
       int i;
       if (last > s->run_count)
         last = s->run_count;
@@ -616,11 +712,10 @@ static void gfx_blit_sprite_rle_rowstart_fast(
   if (sy0 >= sy1)
     return;
 
-  for (sy = sy0; sy < sy1; ++sy) {
+  dst_row = r->tile + (y + sy0 - r->tile_y) * r->tile_stride - r->tile_x;
+  for (sy = sy0; sy < sy1; ++sy, dst_row += r->tile_stride) {
     int first = (int)s->row_start[sy];
     int last = (int)s->row_start[sy + 1];
-    gfx_color_t GFX_PTR *dst_row =
-        r->tile + (y + sy - r->tile_y) * r->tile_stride - r->tile_x;
     int i;
     if (last > s->run_count)
       last = s->run_count;

@@ -62,7 +62,7 @@
       "cacheVariables": {
         "MR_STRESS_MODE": "lace",
         "MR_STRESS_SPRITES": "1024",
-        "MR_STRESS_LACE_BLOCK_H": "4",
+        "MR_STRESS_LACE_BLOCK_H": "8",
         "MR_PICO_SYS_KHZ": "300000",
         "MR_LCD_SPI_BAUD": "75000000"
       }

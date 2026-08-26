@@ -84,6 +84,12 @@ set(MR_LCD_PIN_RST    8        CACHE STRING "ILI9341 reset pin")
 set(MR_LCD_PIN_DC     9        CACHE STRING "ILI9341 data/command pin")
 set(MR_LCD_SPI_BAUD   75000000 CACHE STRING "SPI clock in Hz; 75 MHz is the known-stable starting point")
 set(MR_ILI9341_MADCTL 0xE8     CACHE STRING "MADCTL orientation byte")
+# Panel refresh rate (FRMCTR1). Defaults reproduce the ILI9341 reset state,
+# about 70 Hz. Lower RTNA is faster: 0x19=76Hz, 0x16=86Hz, 0x13=100Hz,
+# 0x10=119Hz. Only meaningful if the presentation rate actually exceeds 70 FPS.
+set(MR_STRESS_LACE_PHASES 2 CACHE STRING "Lace phases; 1 = every row every frame")
+set(MR_ILI9341_FRMCTR1_DIVA 0x00 CACHE STRING "FRMCTR1 fosc division ratio (0-3)")
+set(MR_ILI9341_FRMCTR1_RTNA 0x1B CACHE STRING "FRMCTR1 clocks per line; lower is faster")
 
 # ---------------------------------------------------------------------------
 # clocks
@@ -94,6 +100,11 @@ set(MR_PICO_PERI_PLL_KHZ 0      CACHE STRING "Peripheral PLL in kHz; 0 derives i
 option(MR_PICO_PERI_FROM_SYS  "Drive the peripheral clock from the system clock" ON)
 option(MR_PICO_CLOCK_REQUIRED "Fail at runtime if the requested system clock cannot be set" OFF)
 option(MR_PICO_FRAME_PIPELINE "Overlap tile rasterization with LCD DMA using a second tile buffer" ON)
+# Lace presents alternating row groups with the blocking flush, so rasterization
+# and transfer are strictly serial. Handing the panel to core 1 overlaps them,
+# at the cost of reinstating the 150 KiB second frame buffer that lace normally
+# skips (300 KiB total of 520 KiB). Only affects MR_STRESS_MODE=lace/lacefixed.
+option(MR_PICO_PRESENT_CORE1 "Present lace row groups from core 1 while core 0 renders the next frame" OFF)
 option(MR_PICO_SCREENSHOT "Enable the shared USB RGB565 screenshot service for every Pico app" ON)
 option(MR_PICO_GAME_SERIAL "Enable game USB FPS logs" OFF)
 
@@ -257,6 +268,7 @@ set(MR_SOURCES
     "${MR_SHARED_SRC}/gfx.c"
     "${MR_SHARED_SRC}/gfx_font5x7.c"
     "${MR_SHARED_SRC}/gfx_triangle.c"
+    "${MR_SHARED_SRC}/gfx_rgb444.c"
     "${MR_SHARED_SRC}/gfx_engine.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
     "${MR_SHARED_SRC}/mr_autodemo.c"
@@ -324,12 +336,16 @@ target_compile_definitions(microrender PRIVATE
     MR_LCD_PIN_DC=${MR_LCD_PIN_DC}
     MR_LCD_SPI_BAUD=${MR_LCD_SPI_BAUD}
     MR_ILI9341_MADCTL=${MR_ILI9341_MADCTL}
+    MR_STRESS_LACE_PHASES=${MR_STRESS_LACE_PHASES}
+    MR_ILI9341_FRMCTR1_DIVA=${MR_ILI9341_FRMCTR1_DIVA}
+    MR_ILI9341_FRMCTR1_RTNA=${MR_ILI9341_FRMCTR1_RTNA}
 
     MR_PICO_SYS_KHZ=${MR_PICO_SYS_KHZ}
     MR_PICO_PERI_PLL_KHZ=${MR_PICO_PERI_PLL_KHZ}
     MR_PICO_PERI_FROM_SYS=$<BOOL:${MR_PICO_PERI_FROM_SYS}>
     MR_PICO_CLOCK_REQUIRED=$<BOOL:${MR_PICO_CLOCK_REQUIRED}>
     MR_PICO_FRAME_PIPELINE=$<BOOL:${MR_PICO_FRAME_PIPELINE}>
+    MR_PICO_PRESENT_CORE1=$<BOOL:${MR_PICO_PRESENT_CORE1}>
     MR_PICO_SCREENSHOT=$<BOOL:${MR_PICO_SCREENSHOT}>
     MR_PICO_USB_STDIO=$<BOOL:${MR_PICO_USB_STDIO}>
     MR_PICO_GAME_SERIAL=$<BOOL:${MR_PICO_GAME_SERIAL}>
@@ -396,6 +412,20 @@ target_link_libraries(microrender
     hardware_timer
     hardware_clocks
 )
+
+if(MR_PICO_PRESENT_CORE1)
+    target_link_libraries(microrender pico_multicore)
+    if(NOT MR_STRESS_MODE MATCHES "^lace")
+        message(WARNING
+            "MR_PICO_PRESENT_CORE1 only affects lace presentation; "
+            "MR_STRESS_MODE=${MR_STRESS_MODE} ignores it.")
+    endif()
+    if(MR_TILE_H LESS MR_VIEW_H)
+        message(WARNING
+            "MR_PICO_PRESENT_CORE1 needs a full-height tile "
+            "(MR_TILE_H=${MR_TILE_H}, MR_VIEW_H=${MR_VIEW_H}); ignored.")
+    endif()
+endif()
 
 if(MR_PICO_USB_STDIO)
     pico_enable_stdio_usb(microrender 1)

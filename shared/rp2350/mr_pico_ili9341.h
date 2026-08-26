@@ -35,6 +35,32 @@
 #define MR_ILI9341_MADCTL 0x48u
 #endif
 
+/* Panel refresh rate (FRMCTR1, 0xB1).
+ *
+ * The panel scans its own GRAM independently of how fast we write to it. At
+ * the reset default of about 70 Hz, presentations beyond ~70 FPS are
+ * overwritten before they are ever scanned out, so the extra frames cost SPI
+ * bandwidth and buy nothing visible.
+ *
+ * Frame rate is fosc / (clocks-per-line * (lines + VFP + VBP)). RTNA sets
+ * clocks per line and DIVA divides fosc. Lower RTNA is faster:
+ *
+ *     RTNA  0x1B = 70 Hz (reset default)   0x18 = 79 Hz
+ *           0x19 = 76 Hz                   0x13 = 100 Hz
+ *           0x16 = 86 Hz                   0x10 = 119 Hz (fastest)
+ *
+ * Defaults reproduce the reset state exactly, so this changes nothing until
+ * you ask it to. Raising the refresh rate shortens the blanking interval and
+ * makes tearing more likely, not less -- it is only worth doing alongside a
+ * presentation rate that actually exceeds 70 FPS.
+ */
+#ifndef MR_ILI9341_FRMCTR1_DIVA
+#define MR_ILI9341_FRMCTR1_DIVA 0x00u
+#endif
+#ifndef MR_ILI9341_FRMCTR1_RTNA
+#define MR_ILI9341_FRMCTR1_RTNA 0x1Bu
+#endif
+
 typedef struct mr_pico_ili9341 {
   spi_inst_t *spi;
   unsigned int dma_chan;
