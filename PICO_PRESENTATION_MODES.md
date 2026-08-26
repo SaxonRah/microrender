@@ -162,6 +162,22 @@ acceptable contrast:
 Until this is raised, presenting above ~70 FPS produces frames the panel
 overwrites before scanning out.
 
+### Build directories are per preset, not per flag
+
+`mr.bat build pico <preset> MR_FOO=ON` puts the build in the preset's directory.
+Passing different `MR_*` overrides to the same preset reuses that directory, and
+CMake cache variables persist: a later command that simply omits `MR_FOO` does
+not clear it. The build then silently does not match the command that produced
+it.
+
+`pico_prepare_build_dir` now stamps the flags into `.mr_build_flags` and wipes
+the directory when they change, so this is handled automatically. If a build
+behaves unexpectedly, check `sentKB` in the serial output against what the
+configuration should send -- at 320x240 that is 150 KiB for a full 16bpp frame,
+75 KiB for a 16bpp half frame, 112.5 KiB for a full 12bpp frame and 56.25 KiB
+for a 12bpp half frame. It is the quickest way to confirm what actually got
+built.
+
 ### Split-PLL SPI clock
 
 The RP2350 SPI baud generator divides `clk_peri` by `prescale * postdiv`. With

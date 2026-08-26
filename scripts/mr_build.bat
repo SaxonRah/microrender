@@ -229,7 +229,7 @@ set "PRESET_FLAGS="
 for /f "delims=" %%F in ('%MR_PY% "%MR_ROOT%\scripts\mr_preset_flags.py" "%PICO_SOURCE%" "%PRESET%"') do set "PRESET_FLAGS=%%F"
 if not defined PRESET_FLAGS goto b_pico_badpreset
 set "PICO_BUILD_DIR=%PICO_SOURCE%\build"
-call :pico_prepare_build_dir "%PICO_BUILD_DIR%"
+call :pico_prepare_build_dir "%PICO_BUILD_DIR%" "%PRESET% %PRESET_FLAGS% %EXTRA_FLAGS%"
 if errorlevel 1 exit /b 1
 echo [pico] configuring preset "%PRESET%" into microrender\build for VS Code ...
 cmake -S "%PICO_SOURCE%" -B "%PICO_BUILD_DIR%" -G Ninja ^
@@ -247,7 +247,7 @@ where python >nul 2>nul || set "MR_PY=py"
 set "PICO_BUILD_DIR="
 for /f "delims=" %%D in ('%MR_PY% "%MR_ROOT%\scripts\mr_preset_flags.py" "%PICO_SOURCE%" "%PICO_ONE_PRESET%" --binary-dir') do set "PICO_BUILD_DIR=%%D"
 if not defined PICO_BUILD_DIR goto b_pico_badpreset
-call :pico_prepare_build_dir "%PICO_BUILD_DIR%"
+call :pico_prepare_build_dir "%PICO_BUILD_DIR%" "%PICO_ONE_PRESET% %EXTRA_FLAGS%"
 if errorlevel 1 exit /b 1
 
 echo [pico] configuring preset "%PICO_ONE_PRESET%" %EXTRA_FLAGS% ...
@@ -273,8 +273,18 @@ popd >nul
 exit /b 0
 
 :pico_prepare_build_dir
+rem %~1 = build directory, %~2 = the flags this build is being configured with.
+rem
+rem CMake cache variables are sticky and the build directory is chosen by
+rem preset, not by flags.  So "build pico stress-lace MR_X=ON" followed by
+rem "build pico stress-lace" reuses the first directory and silently keeps
+rem MR_X=ON: the second command does not mention MR_X, so nothing clears it.
+rem That produces a binary that does not match the command that built it,
+rem which is worse than a slow rebuild.  Stamp the flags and wipe on change.
 set "PICO_CHECK_DIR=%~1"
-if not exist "%PICO_CHECK_DIR%\CMakeCache.txt" exit /b 0
+set "PICO_WANT_FLAGS=%~2"
+set "PICO_STAMP=%PICO_CHECK_DIR%\.mr_build_flags"
+if not exist "%PICO_CHECK_DIR%\CMakeCache.txt" goto pico_stamp_write
 set "PICO_CACHE_BAD=0"
 findstr /B /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
 if errorlevel 1 set "PICO_CACHE_BAD=1"
@@ -286,6 +296,14 @@ findstr /L /I /X /C:"CMAKE_HOME_DIRECTORY:INTERNAL=!PICO_EXPECT_SOURCE!" "%PICO_
 if errorlevel 1 set "PICO_CACHE_BAD=1"
 findstr /L /I /X /C:"CMAKE_CACHEFILE_DIR:INTERNAL=!PICO_EXPECT_BUILD!" "%PICO_CHECK_DIR%\CMakeCache.txt" >nul 2>nul
 if errorlevel 1 set "PICO_CACHE_BAD=1"
+set "PICO_HAVE_FLAGS="
+if exist "%PICO_STAMP%" set /p PICO_HAVE_FLAGS=<"%PICO_STAMP%"
+if not "!PICO_HAVE_FLAGS!"=="!PICO_WANT_FLAGS!" (
+    echo [pico] build flags changed since this directory was configured.
+    echo        was: !PICO_HAVE_FLAGS!
+    echo        now: !PICO_WANT_FLAGS!
+    set "PICO_CACHE_BAD=1"
+)
 if "%PICO_CACHE_BAD%"=="1" (
     echo [pico] removing stale or incompatible Pico build directory:
     echo        %PICO_CHECK_DIR%
@@ -296,6 +314,9 @@ if "%PICO_CACHE_BAD%"=="1" (
         exit /b 1
     )
 )
+:pico_stamp_write
+if not exist "%PICO_CHECK_DIR%" mkdir "%PICO_CHECK_DIR%" >nul 2>nul
+>"%PICO_STAMP%" echo(!PICO_WANT_FLAGS!
 exit /b 0
 
 :b_pico_badpreset
