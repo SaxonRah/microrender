@@ -37,15 +37,18 @@
   "buildPresets": [
     {
       "name": "debug",
-      "configurePreset": "debug"
+      "configurePreset": "debug",
+      "configuration": "Debug"
     },
     {
       "name": "index8",
-      "configurePreset": "index8"
+      "configurePreset": "index8",
+      "configuration": "Debug"
     },
     {
       "name": "bench",
-      "configurePreset": "bench"
+      "configurePreset": "bench",
+      "configuration": "Release"
     }
   ],
   "testPresets": [
@@ -54,14 +57,16 @@
       "configurePreset": "debug",
       "output": {
         "outputOnFailure": true
-      }
+      },
+      "configuration": "Debug"
     },
     {
       "name": "index8",
       "configurePreset": "index8",
       "output": {
         "outputOnFailure": true
-      }
+      },
+      "configuration": "Debug"
     }
   ]
 }
