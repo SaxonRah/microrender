@@ -149,13 +149,6 @@ void mr_pico_ili9341_init(mr_pico_ili9341_t *ctx) {
   channel_config_set_write_increment(&ctx->dma_cfg16, false);
   channel_config_set_dreq(&ctx->dma_cfg16, spi_get_dreq(ctx->spi, true));
   channel_config_set_high_priority(&ctx->dma_cfg16, true);
-
-  ctx->dma_cfg8 = dma_channel_get_default_config(ctx->dma_chan);
-  channel_config_set_transfer_data_size(&ctx->dma_cfg8, DMA_SIZE_8);
-  channel_config_set_read_increment(&ctx->dma_cfg8, true);
-  channel_config_set_write_increment(&ctx->dma_cfg8, false);
-  channel_config_set_dreq(&ctx->dma_cfg8, spi_get_dreq(ctx->spi, true));
-  channel_config_set_high_priority(&ctx->dma_cfg8, true);
 }
 
 void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
@@ -171,11 +164,7 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
   lcd_write_cmd(ctx, ILI9341_SLPOUT);
   sleep_ms(150);
 
-#if MR_ILI9341_COLMOD_12BIT
-  data = 0x53u; /* RGB444 / 12bpp: three bytes per two pixels */
-#else
   data = 0x55u; /* RGB565 / 16bpp */
-#endif
   lcd_write_cmd_data(ctx, ILI9341_COLMOD, &data, 1);
   sleep_ms(10);
 
@@ -195,31 +184,6 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
 
   lcd_write_cmd(ctx, ILI9341_DISPON);
   sleep_ms(120);
-}
-
-/* Send an already-packed byte payload into a window. Used for 12 bpp, where a
-   pixel is not a whole number of bytes and the 16-bit DMA path does not apply.
-   Blocking: the 12 bpp path packs and sends a block at a time, so there is no
-   second buffer to hand to an asynchronous transfer. */
-void mr_pico_ili9341_flush_bytes(int x, int y, int w, int h,
-                                 const uint8_t *bytes, size_t nbytes,
-                                 void *user) {
-  mr_pico_ili9341_t *ctx = (mr_pico_ili9341_t *)user;
-
-  if (!ctx || !bytes || w <= 0 || h <= 0 || nbytes == 0u)
-    return;
-
-  if (ctx->dma_active)
-    mr_pico_ili9341_flush_wait(0, user);
-
-  lcd_begin_window_write(ctx, x, y, w, h);
-  lcd_set_spi_format(ctx, 8u);
-
-  dma_channel_configure(ctx->dma_chan, &ctx->dma_cfg8, &spi_get_hw(ctx->spi)->dr,
-                        bytes, (uint32_t)nbytes, true);
-  dma_channel_wait_for_finish_blocking(ctx->dma_chan);
-  lcd_wait_spi_idle(ctx);
-  lcd_deselect(ctx);
 }
 
 void mr_pico_ili9341_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,

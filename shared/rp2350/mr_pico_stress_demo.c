@@ -9,7 +9,6 @@
 #endif
 #include "mr_strbuf.h"
 #include "gfx.h"
-#include "gfx_rgb444.h"
 #include "hardware/clocks.h"
 #include "hardware/pll.h"
 #include "hardware/regs/clocks.h"
@@ -899,16 +898,6 @@ static void stress_render_fullframe_dirtyrect(gfx_color_t *buffer) {
 #define MR_STRESS_LACE_PHASES 2
 #endif
 
-#if (MR_STRESS_PICO_FLUSH_MODE == 6) && MR_ILI9341_COLMOD_12BIT
-/* Worst-case block is MR_STRESS_PICO_LACE_BLOCK_H rows, clamped to the view.
-   Three bytes per two pixels, rounded up. */
-#define MR_STRESS_PACK_ROWS                                                    \
-  ((MR_STRESS_PICO_LACE_BLOCK_H > MR_VIEW_H) ? MR_VIEW_H                       \
-                                             : MR_STRESS_PICO_LACE_BLOCK_H)
-static uint8_t stress_pack_buf[((MR_SCREEN_W * MR_STRESS_PACK_ROWS) * 3 + 1) /
-                               2];
-#endif
-
 #if MR_STRESS_PICO_FLUSH_MODE == 6
 /* Send one lace phase. Callable from either core: the renderer argument is
    unused by the ILI9341 flush, so this touches only the panel and the buffer
@@ -936,23 +925,8 @@ static void stress_lace_send_phase(const gfx_color_t *buffer, int phase) {
       h = MR_VIEW_H - y;
     if (h <= 0)
       continue;
-#if MR_ILI9341_COLMOD_12BIT
-    {
-      /* Pack a block at a time into a small static buffer rather than keeping
-         a second full-size packed frame. A block is at most
-         MR_SCREEN_W * block_h pixels, and packing it costs roughly 6% of the
-         time its own transfer takes, so it hides inside the pipeline. */
-      size_t nbytes =
-          gfx_pack_rgb444(stress_pack_buf, buffer + y * MR_SCREEN_W,
-                          MR_SCREEN_W * h);
-      if (nbytes)
-        mr_pico_ili9341_flush_bytes(0, y, MR_SCREEN_W, h, stress_pack_buf,
-                                    nbytes, &lcd);
-    }
-#else
     mr_pico_ili9341_flush(0, 0, y, MR_SCREEN_W, h, buffer + y * MR_SCREEN_W,
                           &lcd);
-#endif
   }
 }
 #endif
@@ -1014,12 +988,7 @@ static void stress_render_fullframe_lace_core1(void) {
     unsigned long rows =
         (MR_STRESS_LACE_PHASES <= 1) ? (unsigned long)MR_VIEW_H
                                      : ((unsigned long)MR_VIEW_H / 2ul);
-    unsigned long px = (unsigned long)MR_SCREEN_W * rows;
-#if MR_ILI9341_COLMOD_12BIT
-    stress_flush_bytes += (px * 3ul + 1ul) / 2ul;
-#else
-    stress_flush_bytes += px * 2ul;
-#endif
+    stress_flush_bytes += (unsigned long)MR_SCREEN_W * rows * 2ul;
   }
   lace_present_async(buffer, (int)(frame_counter & 1ul));
 }

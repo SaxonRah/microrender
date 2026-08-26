@@ -54,16 +54,6 @@
  * makes tearing more likely, not less -- it is only worth doing alongside a
  * presentation rate that actually exceeds 70 FPS.
  */
-/* Drive the panel at 12 bits per pixel (COLMOD DBI=3) instead of 16.
- *
- * Three bytes per two pixels rather than four: 115,200 bytes per 320x240 frame
- * instead of 153,600, a 25% cut in wire time for every frame. Costs one bit of
- * red and blue and two of green, so gradients band. Look at it on the panel
- * before deciding it is worth the bandwidth. */
-#ifndef MR_ILI9341_COLMOD_12BIT
-#define MR_ILI9341_COLMOD_12BIT 0
-#endif
-
 #ifndef MR_ILI9341_FRMCTR1_DIVA
 #define MR_ILI9341_FRMCTR1_DIVA 0x00u
 #endif
@@ -86,7 +76,6 @@ typedef struct mr_pico_ili9341 {
   unsigned int dma_active;
   unsigned int spi_format_bits;
   dma_channel_config dma_cfg16;
-  dma_channel_config dma_cfg8;
 } mr_pico_ili9341_t;
 
 void mr_pico_ili9341_init(mr_pico_ili9341_t *ctx);
@@ -101,10 +90,5 @@ void mr_pico_ili9341_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,
                                  const gfx_color_t *pixels, void *user);
 
 void mr_pico_ili9341_flush_wait(gfx_renderer_t *r, void *user);
-
-/* Send an already-packed byte payload (12 bpp). Blocking. */
-void mr_pico_ili9341_flush_bytes(int x, int y, int w, int h,
-                                 const uint8_t *bytes, size_t nbytes,
-                                 void *user);
 
 #endif

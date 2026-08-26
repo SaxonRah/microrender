@@ -322,8 +322,6 @@ exit /b 0
 :b_pico_badpreset
 echo Available presets: game, game-raw, stress-raw, stress-visible, stress-lace,
 echo                    stress-render, stress-dirtyrect, all
-echo Split-PLL 85 MHz SPI variants: stress-lace-85, stress-visible-85
-echo   (not included in "all"; verify your panel tolerates 85 MHz first)
 exit /b 1
 
 rem ---------------------------------------------------------------------------

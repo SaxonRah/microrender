@@ -122,45 +122,80 @@ Two consequences worth keeping in mind before chasing a bigger number:
 
 ### Measured on a Pimoroni Pico Plus 2 (RP2350)
 
-`lace` + `MR_PICO_PRESENT_CORE1=ON`, 1024 sprites, 75 MHz SPI, 300 MHz system:
+All figures from `stress-lace` with `MR_PICO_PRESENT_CORE1=ON`, 1024 sprites,
+75 MHz SPI, 300 MHz system. Wire rate is `sentKB` divided by `frameUs`.
 
-```
-fps=110.0  frameUs=9072  cpuUs=5181  flushUs=3892  sentKB per frame=75
-```
+| configuration | KiB/frame | frameUs | FPS | wire rate | render |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 16bpp, block_h=4 | 75.0 | 9072 | 110.0 | 68.1 Mb/s (90.9%) | clean |
+| 16bpp, block_h=8 | 75.0 | 9017 | 110.8 | 68.1 Mb/s (90.9%) | clean |
+| 12bpp, half frame | 56.25 | 8871 | 112.6 | 51.9 Mb/s (69.3%) | scrambled |
+| 12bpp, full frame | 112.5 | 17477 | 57.1 | 52.7 Mb/s (70.3%) | clean |
 
-`flushUs` is core 0's *wait*, not the transfer duration: the transfer spans the
-whole frame, overlapping the 5.2 ms of rasterization and blocking core 0 for the
-remaining 3.9 ms. So:
+`cpuUs` sits at 5.0-5.4 ms in every one of these, so rasterization is about
+5.2 ms and would sustain roughly 190 FPS on its own. `flushUs` is core 0's
+*wait*, not the transfer time: the transfer spans the whole frame, overlapping
+the render and blocking core 0 for the remainder.
 
-- rasterization is about 5.2 ms, a ~192 FPS ceiling on its own
-- transfer is about 9.07 ms, of which 8.19 ms is pure wire time at 75 MHz
-- the remaining ~0.88 ms is per-block protocol: 30 row groups at roughly 29 us
-  each for the window write, the 8/16-bit format switches, and the DMA drain
+Three things fall out of this, two of which contradict what the earlier drafts
+of this document claimed.
 
-That is 88% bus efficiency. Fewer, larger row groups recover most of the rest:
-`MR_STRESS_LACE_BLOCK_H=8` should reach about 116 FPS for a one-line change.
+**Per-block overhead is small.** Doubling the row group from 4 to 8 rows halves
+the number of window setups and saved 55 us, so a block costs about 3.7 us.
+The ~880 us gap between 8.19 ms of theoretical wire time and the 9.07 ms
+actually observed is therefore not window setup -- it is PL022 framing. At
+90.9% of the SPI clock there is very little left to reclaim by restructuring
+the transfer.
 
-### Panel refresh is the real ceiling
+**12 bpp does not pay on this transport.** Sending 25% fewer bytes produced
+1.6% more FPS. Both 16bpp configurations reach 68.1 Mb/s and both 12bpp ones
+about 52 Mb/s: 8-bit DMA frames are roughly 70% wire-efficient against 90.9%
+for 16-bit, and the framing overhead consumes the entire byte saving. The
+full-frame 12bpp case is the clearest statement of it -- 57.1 FPS, no better
+than the 55.8 FPS the plain 16bpp `visible` mode already managed.
 
-Measured on the same panel: `MR_ILI9341_FRMCTR1_RTNA=0x10` (the datasheet's
-119 Hz setting) produced a washed-out white screen with the render barely
-visible behind it. That is what an under-driven panel looks like -- fewer clocks
-per line means less time to charge each row, so the crystal never fully
-switches. The datasheet maximum is not what a given module will actually hold.
+**The panel is the ceiling, not the bus.** `MR_ILI9341_FRMCTR1_RTNA=0x10`, the
+datasheet's 119 Hz setting, produced a washed-out white screen with the image
+faint behind it -- fewer clocks per line means less time to charge each row, so
+the crystal never fully switches. Sweep `0x19` (76 Hz), `0x18` (79 Hz),
+`0x16` (86 Hz) and stop at the last value with acceptable contrast. Until it is
+raised, presenting above ~70 FPS produces frames the panel overwrites before
+scanning out, which is the real reason there is nothing left to win here.
 
-Sweep it rather than jumping to the fast end, and stop at the last value with
-acceptable contrast:
+**Recommended configuration:** `stress-lace` with `MR_PICO_PRESENT_CORE1=ON`.
+110.8 FPS at stock clocks, stock pixel format, and a clean image.
 
-| RTNA | nominal | |
-| --- | --- | --- |
-| `0x1B` | 70 Hz | reset default, known good |
-| `0x19` | 76 Hz | try first |
-| `0x18` | 79 Hz | |
-| `0x16` | 86 Hz | |
-| `0x10` | 119 Hz | washed out on a Pico Plus 2 + generic ILI9341 |
+### Build directories are per preset, not per flag
 
-Until this is raised, presenting above ~70 FPS produces frames the panel
-overwrites before scanning out.
+`mr.bat build pico <preset> MR_FOO=ON` puts the build in the preset's directory.
+Passing different `MR_*` overrides to the same preset reuses that directory, and
+CMake cache variables persist: a later command that simply omits `MR_FOO` does
+not clear it. The build then silently does not match the command that produced
+it.
+
+`pico_prepare_build_dir` now stamps the flags into `.mr_build_flags` and wipes
+the directory when they change, so this is handled automatically. If a build
+behaves unexpectedly, check `sentKB` in the serial output against what the
+configuration should send -- at 320x240 that is 150 KiB for a full 16bpp frame,
+75 KiB for a 16bpp half frame, 112.5 KiB for a full 12bpp frame and 56.25 KiB
+for a 12bpp half frame. It is the quickest way to confirm what actually got
+built.
+
+### Split-PLL SPI clock: does not work, presets removed
+
+`MR_PICO_PERI_PLL_KHZ` exists to work around the SPI baud generator, which
+divides `clk_peri` by `prescale * postdiv`: from 300 MHz the reachable rates
+step 150 / 75 / 50 / 37.5, so anything requested between 75 and 150 lands back
+on 75. Reaching 85 MHz while keeping `clk_sys` at 300 needs a 340 MHz PLL.
+
+Two presets that did this were added and then removed. Both hang before the
+first serial print. The original cause was clear -- the function passed the PLL
+rate to `set_sys_clock_khz()`, running the whole chip including XIP flash at
+340 MHz while executing the clock-change code from that flash -- but rewriting
+it to park `clk_sys` on `clk_ref`, retune `pll_sys`, and return at 300 MHz did
+not fix it. The path remains unusable and is not currently worth chasing:
+the panel will not display much past ~86 Hz, and lace already reaches 110 FPS
+at 75 MHz, so faster SPI has nothing to buy.
 
 ### Build directories are per preset, not per flag
 

@@ -28,6 +28,16 @@ extern "C" {
  * blue and two of green. Smooth gradients will band. This is a bandwidth
  * trade, not a free win.
  *
+ * NOTE: no backend currently uses this. It was written for the ILI9341's 12 bpp
+ * mode and measured on an RP2350 at 75 MHz SPI, where it lost: sending 25%
+ * fewer bytes produced only 1.6% more FPS, because the PL022 reaches about 91%
+ * of the SPI clock with 16-bit DMA frames but only about 70% with 8-bit ones.
+ * The framing overhead ate the entire saving. See PICO_PRESENTATION_MODES.md.
+ *
+ * That result is specific to a byte-wide SPI transport. On a parallel or
+ * 16-bit-framed interface the byte count is what matters and this becomes
+ * worth using again, which is why it is kept rather than deleted.
+ *
  * Returns the number of bytes written, or 0 if the arguments are unusable.
  * dst must have room for (count * 3 + 1) / 2 bytes.
  */
