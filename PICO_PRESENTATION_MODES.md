@@ -91,6 +91,60 @@ performance guarantees. The checked-in `stress-visible` preset currently uses
 512 sprites; `stress-lace` uses 1,024. Dirty-rectangle performance is
 scene-dependent and the preset uses 512 sprites with 16-row tiles.
 
+### Why those two numbers look the way they do
+
+A 320x240 RGB565 frame is 1,228,800 bits. The SPI clock therefore sets a hard
+ceiling that no amount of rasterizer work can cross:
+
+| SPI clock | full frame | ceiling | half frame (`lace`) | ceiling |
+| ---: | ---: | ---: | ---: | ---: |
+| 75 MHz | 16.38 ms | 61.0 FPS | 8.19 ms | 122.1 FPS |
+| 85 MHz | 14.46 ms | 69.2 FPS | 7.23 ms | 138.4 FPS |
+
+`visible` at 55.8 FPS is running at about 91% of the 75 MHz full-frame ceiling.
+It is a bus measurement, not a renderer measurement. `lace` exceeds 61 FPS only
+because it sends half the rows per presentation; its *complete-image* rate is
+about 38 Hz.
+
+Subtracting wire time from the measured `lace` frame time leaves roughly 5 ms of
+rasterization, so the renderer alone would sustain something near 200 FPS. On
+this hardware the renderer is not the limit and has not been for some time.
+
+Two consequences worth keeping in mind before chasing a bigger number:
+
+- `lace` presents with the blocking `mr_pico_ili9341_flush`, so its ~5 ms of
+  rasterization and ~8 ms of transfer are strictly serial even though
+  `tile_buffer_b` is already allocated.
+- The panel scans its own GRAM at whatever `FRMCTR1` says, which this driver
+  never writes; the reset default is about 70 Hz. Above that, extra
+  presentations are overwritten before they are scanned out. The ILI9341 TE pin
+  is likewise unused, so nothing is synchronized to the panel scan.
+
+### Split-PLL SPI clock
+
+The RP2350 SPI baud generator divides `clk_peri` by `prescale * postdiv`. With
+`clk_peri` at 300 MHz the reachable rates step 150 / 75 / 50 / 37.5 MHz, so a
+request anywhere between 75 and 150 MHz lands back on 75. 75 MHz is a divider
+artifact, not a panel limit.
+
+`MR_PICO_PERI_PLL_KHZ` already exists to work around this: it runs the system
+PLL at a higher rate, attaches `clk_peri` directly to it, and divides `clk_sys`
+back down separately. Two presets now exercise it:
+
+```powershell
+.\mr.bat build pico stress-lace-85
+.\mr.bat build pico stress-visible-85
+```
+
+Both set the system PLL to 340 MHz, `clk_sys` to the known-good 300 MHz, and
+the SPI clock to an exact 340/4 = 85 MHz. Confirm the achieved rate from the
+`spi: requested=... actual=...` line rather than assuming it took.
+
+85 MHz is above the ILI9341 datasheet write-cycle rating and is a per-board
+question: it depends on wire length, level shifting, and the specific panel.
+If the display shows dropped or smeared pixels, step back to 75 MHz. This is
+why the faster values are separate presets rather than new defaults.
+
 ## Universal USB screenshots
 
 `MR_PICO_SCREENSHOT` defaults to `ON`. CMake enables USB stdio when screenshot
