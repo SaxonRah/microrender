@@ -32,6 +32,10 @@ for %%R in (%SWEEP%) do (
     echo ============================================================
     echo [sweep] building RTNA=%%R
     echo ============================================================
+    rem Let the previous build's file handles close before mr.bat tries to
+    rem wipe the directory. mr_build.bat retries on its own, but pausing here
+    rem means it usually does not have to.
+    ping -n 3 127.0.0.1 >nul 2>nul
     call "%MR_ROOT%\mr.bat" build pico stress-lace MR_ILI9341_FRMCTR1_RTNA=%%R serial=ON
     if errorlevel 1 (
         echo ERROR: build failed for RTNA=%%R
@@ -48,6 +52,9 @@ echo ============================================================
 echo [sweep] done. UF2 images in:
 echo     %OUTDIR%
 echo.
+rem If a build fails because the directory is locked, close any editor or
+rem terminal sitting in microrender\build-stress-lace and re-run; the sweep is
+rem idempotent and will simply rebuild.
 echo Flash them in order, starting with 0x1B as your reference.
 echo Take the fastest value that still shows solid blacks and
 echo full-brightness whites, then step back one for margin.

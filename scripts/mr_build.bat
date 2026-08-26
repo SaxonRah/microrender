@@ -304,16 +304,27 @@ if not "!PICO_HAVE_FLAGS!"=="!PICO_WANT_FLAGS!" (
     echo        now: !PICO_WANT_FLAGS!
     set "PICO_CACHE_BAD=1"
 )
-if "%PICO_CACHE_BAD%"=="1" (
-    echo [pico] removing stale or incompatible Pico build directory:
-    echo        %PICO_CHECK_DIR%
-    rmdir /S /Q "%PICO_CHECK_DIR%"
-    if exist "%PICO_CHECK_DIR%" (
-        echo ERROR: could not remove stale Pico build directory.
-        echo Close Visual Studio, VS Code build tasks, or any terminal using it and retry.
-        exit /b 1
-    )
+if not "%PICO_CACHE_BAD%"=="1" goto pico_stamp_write
+echo [pico] removing stale or incompatible Pico build directory:
+echo        %PICO_CHECK_DIR%
+rem Windows can hold a handle on freshly written build output for a moment
+rem after the writing process exits -- .ninja_log is the usual casualty, and
+rem antivirus scanning a just-finished build makes it reliable rather than
+rem rare. Retry instead of failing the first time, which otherwise breaks any
+rem script that configures the same directory twice in a row.
+set "PICO_RM_TRIES=0"
+:pico_rm_retry
+rmdir /S /Q "%PICO_CHECK_DIR%" 2>nul
+if not exist "%PICO_CHECK_DIR%" goto pico_stamp_write
+set /a PICO_RM_TRIES+=1
+if !PICO_RM_TRIES! GEQ 15 (
+    echo ERROR: could not remove stale Pico build directory after 15 attempts.
+    echo Close Visual Studio, VS Code build tasks, or any terminal using it and retry.
+    exit /b 1
 )
+if !PICO_RM_TRIES!==1 echo [pico] directory is locked, retrying ...
+ping -n 2 127.0.0.1 >nul 2>nul
+goto pico_rm_retry
 :pico_stamp_write
 if not exist "%PICO_CHECK_DIR%" mkdir "%PICO_CHECK_DIR%" >nul 2>nul
 >"%PICO_STAMP%" echo(!PICO_WANT_FLAGS!
