@@ -20,6 +20,9 @@ small tile or a full-frame working buffer, plus presentation callbacks. That is
 what allows the same drawing and game code to run on segmented 16-bit DOS,
 RP2350, and desktop hosts.
 
+#### Pico2 - 110 FPS
+![Pico 2 capture](https://raw.githubusercontent.com/SaxonRah/microrender/main/pico2_screenshot.png)
+#### Pico2 - 76 FPS
 ![Pico 2 capture](https://raw.githubusercontent.com/SaxonRah/microrender/main/microrender/pico2_screenshot.png)
 
 ## Clone and initialize dependencies
