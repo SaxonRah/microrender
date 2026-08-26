@@ -84,6 +84,11 @@ set(MR_LCD_PIN_RST    8        CACHE STRING "ILI9341 reset pin")
 set(MR_LCD_PIN_DC     9        CACHE STRING "ILI9341 data/command pin")
 set(MR_LCD_SPI_BAUD   75000000 CACHE STRING "SPI clock in Hz; 75 MHz is the known-stable starting point")
 set(MR_ILI9341_MADCTL 0xE8     CACHE STRING "MADCTL orientation byte")
+# Panel refresh rate (FRMCTR1). Defaults reproduce the ILI9341 reset state,
+# about 70 Hz. Lower RTNA is faster: 0x19=76Hz, 0x16=86Hz, 0x13=100Hz,
+# 0x10=119Hz. Only meaningful if the presentation rate actually exceeds 70 FPS.
+set(MR_ILI9341_FRMCTR1_DIVA 0x00 CACHE STRING "FRMCTR1 fosc division ratio (0-3)")
+set(MR_ILI9341_FRMCTR1_RTNA 0x1B CACHE STRING "FRMCTR1 clocks per line; lower is faster")
 
 # ---------------------------------------------------------------------------
 # clocks
@@ -329,6 +334,8 @@ target_compile_definitions(microrender PRIVATE
     MR_LCD_PIN_DC=${MR_LCD_PIN_DC}
     MR_LCD_SPI_BAUD=${MR_LCD_SPI_BAUD}
     MR_ILI9341_MADCTL=${MR_ILI9341_MADCTL}
+    MR_ILI9341_FRMCTR1_DIVA=${MR_ILI9341_FRMCTR1_DIVA}
+    MR_ILI9341_FRMCTR1_RTNA=${MR_ILI9341_FRMCTR1_RTNA}
 
     MR_PICO_SYS_KHZ=${MR_PICO_SYS_KHZ}
     MR_PICO_PERI_PLL_KHZ=${MR_PICO_PERI_PLL_KHZ}

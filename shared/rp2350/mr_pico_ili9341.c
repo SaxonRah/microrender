@@ -14,6 +14,7 @@
 #define ILI9341_RAMWR 0x2Cu
 #define ILI9341_MADCTL 0x36u
 #define ILI9341_COLMOD 0x3Au
+#define ILI9341_FRMCTR1 0xB1u
 
 static inline void lcd_gpio_put_fast(unsigned int pin, unsigned int value) {
   if (pin < 32u) {
@@ -170,6 +171,16 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
   data = (uint8_t)MR_ILI9341_MADCTL;
   lcd_write_cmd_data(ctx, ILI9341_MADCTL, &data, 1);
   sleep_ms(10);
+
+#if (MR_ILI9341_FRMCTR1_DIVA != 0x00u) || (MR_ILI9341_FRMCTR1_RTNA != 0x1Bu)
+  {
+    uint8_t frmctr[2];
+    frmctr[0] = (uint8_t)(MR_ILI9341_FRMCTR1_DIVA & 0x03u);
+    frmctr[1] = (uint8_t)(MR_ILI9341_FRMCTR1_RTNA & 0x1Fu);
+    lcd_write_cmd_data(ctx, ILI9341_FRMCTR1, frmctr, 2);
+    sleep_ms(10);
+  }
+#endif
 
   lcd_write_cmd(ctx, ILI9341_DISPON);
   sleep_ms(120);
