@@ -267,6 +267,7 @@ set(MR_SOURCES
     "${MR_SHARED_SRC}/gfx.c"
     "${MR_SHARED_SRC}/gfx_font5x7.c"
     "${MR_SHARED_SRC}/gfx_triangle.c"
+    "${MR_SHARED_SRC}/gfx_rgb444.c"
     "${MR_SHARED_SRC}/gfx_engine.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
     "${MR_SHARED_SRC}/mr_autodemo.c"

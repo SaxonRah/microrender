@@ -12,6 +12,7 @@
  * different specification. It gets its own alignment test instead.
  */
 #include "mr_test_support.h"
+#include "gfx_rgb444.h"
 #include "gfx_engine.h"
 #include "mr_strbuf.h"
 
@@ -517,6 +518,116 @@ typedef struct {
   test_fn fn;
 } test_entry_t;
 
+
+/* ------------------------------------------------------------------ */
+/* RGB565 -> packed 12-bit RGB444                                      */
+/* ------------------------------------------------------------------ */
+
+static void test_rgb444_pack(void) {
+#if GFX_COLOR_FORMAT != GFX_COLOR_FORMAT_RGB565
+  /* The indexed build has no direct-colour value to pack, so the function
+     refuses rather than emitting plausible garbage. Pin that contract down:
+     silently returning a byte count here would desynchronise a whole frame. */
+  uint8_t buf[16];
+  gfx_color_t src[2];
+  src[0] = GFX_RGB565_WHITE;
+  src[1] = GFX_RGB565_BLACK;
+  MRT_CHECK_EQ_INT(gfx_pack_rgb444(buf, src, 2), 0,
+                   "indexed builds must refuse to pack");
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(320), 480,
+                   "byte count math is format independent");
+#else
+  uint8_t buf[16];
+  gfx_color_t src[4];
+  size_t n;
+
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(0), 0, "byte count of 0");
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(2), 3, "byte count of 2");
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(320), 480, "byte count of a row");
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(1), 2, "byte count of 1 rounds up");
+  MRT_CHECK_EQ_INT(gfx_rgb444_byte_count(-4), 0, "negative count");
+
+  /* Saturated channels must stay saturated: truncation of 0x1F/0x3F must not
+     land one step below full scale, or whites go grey and reds go dull. */
+  memset(buf, 0xAA, sizeof(buf));
+  src[0] = GFX_RGB565_WHITE;
+  src[1] = GFX_RGB565_WHITE;
+  n = gfx_pack_rgb444(buf, src, 2);
+  MRT_CHECK_EQ_INT(n, 3, "two pixels pack to three bytes");
+  MRT_CHECK_EQ_INT(buf[0], 0xFF, "white byte 0");
+  MRT_CHECK_EQ_INT(buf[1], 0xFF, "white byte 1");
+  MRT_CHECK_EQ_INT(buf[2], 0xFF, "white byte 2");
+  MRT_CHECK_EQ_INT(buf[3], 0xAA, "pack must not run past its byte count");
+
+  memset(buf, 0xAA, sizeof(buf));
+  src[0] = GFX_RGB565_BLACK;
+  src[1] = GFX_RGB565_BLACK;
+  (void)gfx_pack_rgb444(buf, src, 2);
+  MRT_CHECK_EQ_INT(buf[0] | buf[1] | buf[2], 0x00, "black packs to zero");
+
+  /* Channel placement: a pure primary must land in exactly one nibble of the
+     two-pixel group and leave the others alone. This is the test that catches
+     a shifted or swapped channel, which would otherwise look merely "tinted"
+     on hardware. */
+  memset(buf, 0x00, sizeof(buf));
+  src[0] = GFX_RGB565_RED;
+  src[1] = GFX_RGB565_BLUE;
+  (void)gfx_pack_rgb444(buf, src, 2);
+  MRT_CHECK_EQ_INT(buf[0], 0xF0, "red: R nibble high, G nibble clear");
+  MRT_CHECK_EQ_INT(buf[1], 0x00, "red B clear, blue R clear");
+  MRT_CHECK_EQ_INT(buf[2], 0x0F, "blue: G nibble clear, B nibble set");
+
+  memset(buf, 0x00, sizeof(buf));
+  src[0] = GFX_RGB565_GREEN;
+  src[1] = GFX_RGB565_BLACK;
+  (void)gfx_pack_rgb444(buf, src, 2);
+  MRT_CHECK_EQ_INT(buf[0], 0x0F, "green sits in the low nibble of byte 0");
+
+  /* Odd counts emit a trailing half pixel and report it. Rows are 320 wide so
+     this should never happen in practice, but a partial write that silently
+     under-reports would desynchronise the whole rest of the frame. */
+  memset(buf, 0xAA, sizeof(buf));
+  src[0] = GFX_RGB565_WHITE;
+  n = gfx_pack_rgb444(buf, src, 1);
+  MRT_CHECK_EQ_INT(n, 2, "one pixel packs to two bytes");
+  MRT_CHECK_EQ_INT(buf[0], 0xFF, "odd tail byte 0");
+  MRT_CHECK_EQ_INT(buf[1], 0xF0, "odd tail byte 1 is half a pixel");
+  MRT_CHECK_EQ_INT(buf[2], 0xAA, "odd tail must not write a third byte");
+
+  MRT_CHECK_EQ_INT(gfx_pack_rgb444(0, src, 2), 0, "null dst");
+  MRT_CHECK_EQ_INT(gfx_pack_rgb444(buf, 0, 2), 0, "null src");
+  MRT_CHECK_EQ_INT(gfx_pack_rgb444(buf, src, 0), 0, "zero count");
+
+  /* Every representable 565 value must survive the trip with bounded error:
+     one step of red/blue, three of green. A wider error means a bad shift. */
+  {
+    unsigned long v;
+    int worst_r = 0, worst_g = 0, worst_b = 0;
+    for (v = 0; v <= 0xFFFFul; ++v) {
+      gfx_color_t c = (gfx_color_t)v;
+      uint8_t two[3];
+      int r5, g6, b5, r4, g4, b4, d;
+      gfx_color_t pair[2];
+      pair[0] = c;
+      pair[1] = c;
+      (void)gfx_pack_rgb444(two, pair, 2);
+      r4 = (two[0] >> 4) & 0x0F;
+      g4 = two[0] & 0x0F;
+      b4 = (two[1] >> 4) & 0x0F;
+      r5 = (c >> 11) & 0x1F;
+      g6 = (c >> 5) & 0x3F;
+      b5 = c & 0x1F;
+      d = r5 - (r4 << 1); if (d < 0) d = -d; if (d > worst_r) worst_r = d;
+      d = g6 - (g4 << 2); if (d < 0) d = -d; if (d > worst_g) worst_g = d;
+      d = b5 - (b4 << 1); if (d < 0) d = -d; if (d > worst_b) worst_b = d;
+    }
+    MRT_CHECK(worst_r <= 1, "red error over all 65536 values: %d", worst_r);
+    MRT_CHECK(worst_g <= 3, "green error over all 65536 values: %d", worst_g);
+    MRT_CHECK(worst_b <= 1, "blue error over all 65536 values: %d", worst_b);
+  }
+#endif
+}
+
 int main(void) {
   static const test_entry_t tests[] = {
       {"blit alignment", test_blit_alignment},
@@ -532,6 +643,7 @@ int main(void) {
       {"degenerate sprites", test_degenerate_sprites},
       {"line endpoints", test_line_endpoints},
       {"shared string builder", test_strbuf},
+      {"rgb444 packing", test_rgb444_pack},
   };
   size_t i;
   int before;
