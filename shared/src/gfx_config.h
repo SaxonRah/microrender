@@ -52,6 +52,27 @@
 #endif
 #endif
 
+/* 32-bit-wide pixel moves.
+
+   The innermost fill/copy loops move gfx_color_t one element at a time. On a
+   32-bit target with a 16-bit colour format that wastes half of every bus
+   cycle: two adjacent RGB565 pixels are exactly one aligned 32-bit word.
+
+   This is enabled for flat-pointer 32-bit targets only. DOS large/huge model
+   keeps the element-at-a-time loop, because far pointer arithmetic and a
+   16-bit int make the alignment bookkeeping cost more than the wider store
+   saves, and because a segment-crossing huge pointer must not be walked as a
+   word array.
+
+   Override by defining GFX_FAST_WORD_COPY yourself. */
+#ifndef GFX_FAST_WORD_COPY
+#if !GFX_INT_IS_16BIT && !defined(__WATCOMC__)
+#define GFX_FAST_WORD_COPY 1
+#else
+#define GFX_FAST_WORD_COPY 0
+#endif
+#endif
+
 #ifndef GFX_DEFAULT_TILE_H
 #define GFX_DEFAULT_TILE_H 16
 #endif
