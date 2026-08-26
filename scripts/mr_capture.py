@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Capture screenshots and metrics from MicroRender frontends into one report.
+
+Every platform emits the same capture format, so one parser handles all of
+them and a file written by the Raylib frontend is byte-comparable with one
+pulled off a Pico over USB:
+
+    MRSHOT1 <width> <height> <bytes>\\n
+    <width*height little-endian RGB565 pixels>
+
+Usage
+-----
+    python scripts/mr_capture.py raylib                 run the Raylib matrix
+    python scripts/mr_capture.py pico COM5              capture from a Pico
+    python scripts/mr_capture.py raylib pico COM5       both
+
+Output lands in capture/ as PNGs plus report.md and report.csv.
+
+Only the standard library is required for Raylib capture; PNG encoding uses
+zlib directly rather than pulling in Pillow. Pico capture needs pyserial.
+"""
+
+import csv
+import os
+import struct
+import subprocess
+import sys
+import time
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "capture")
+
+# label, extra args. Kept short deliberately: this is a capture set for
+# comparison and documentation, not the exhaustive matrix that
+# mr_test_raylib.bat covers.
+RAYLIB_CASES = [
+    ("game-tiled16", ["--demo", "game", "--mode", "tiled", "--tile", "16",
+                      "--autoplay"]),
+    ("game-raw", ["--demo", "game", "--mode", "raw", "--autoplay"]),
+    ("stress-visible-512", ["--demo", "stress", "--mode", "visible",
+                            "--sprites", "512"]),
+    ("stress-lace-1024", ["--demo", "stress", "--mode", "lace", "--sprites",
+                          "1024", "--lace-block", "8"]),
+    ("stress-render-1024", ["--demo", "stress", "--mode", "render",
+                            "--sprites", "1024"]),
+]
+
+
+# --------------------------------------------------------------------------
+# capture format
+# --------------------------------------------------------------------------
+
+def parse_shot(blob):
+    """Split an MRSHOT1 blob into (width, height, rgb565 bytes)."""
+    nl = blob.find(b"\n")
+    if nl < 0:
+        raise ValueError("no MRSHOT1 header line")
+    parts = blob[:nl].split()
+    if len(parts) != 4 or parts[0] != b"MRSHOT1":
+        raise ValueError("bad header: %r" % blob[:nl][:60])
+    w, h, nbytes = int(parts[1]), int(parts[2]), int(parts[3])
+    body = blob[nl + 1:nl + 1 + nbytes]
+    if len(body) != nbytes:
+        raise ValueError("short body: got %d of %d bytes" % (len(body), nbytes))
+    return w, h, body
+
+
+def rgb565_to_rgb888(body, w, h):
+    """Expand to 8 bits per channel, replicating high bits into the low ones so
+    full-scale input stays full scale (0x1F -> 0xFF, not 0xF8)."""
+    out = bytearray(w * h * 3)
+    for i in range(w * h):
+        v = body[2 * i] | (body[2 * i + 1] << 8)
+        r = (v >> 11) & 0x1F
+        g = (v >> 5) & 0x3F
+        b = v & 0x1F
+        out[3 * i] = (r << 3) | (r >> 2)
+        out[3 * i + 1] = (g << 2) | (g >> 4)
+        out[3 * i + 2] = (b << 3) | (b >> 2)
+    return bytes(out)
+
+
+def write_png(path, rgb, w, h):
+    """Minimal PNG writer. Avoids a Pillow dependency for what is a handful of
+    fixed-size screenshots."""
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)  # filter type 0
+        raw += rgb[y * w * 3:(y + 1) * w * 3]
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data +
+                struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    png = b"\x89PNG\r\n\x1a\n"
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    png += chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+def read_report(path):
+    vals = {}
+    if not os.path.exists(path):
+        return vals
+    with open(path, "r") as f:
+        for line in f:
+            if "=" in line:
+                k, v = line.strip().split("=", 1)
+                vals[k] = v
+    return vals
+
+
+# --------------------------------------------------------------------------
+# platforms
+# --------------------------------------------------------------------------
+
+def capture_raylib(rows, frames=600):
+    exe = None
+    for cand in ("microrender_raylib.exe", "microrender_raylib"):
+        for sub in ("build/raylib/Release", "build/raylib", "build-raylib"):
+            p = os.path.join(ROOT, sub, cand)
+            if os.path.exists(p):
+                exe = p
+                break
+        if exe:
+            break
+    if not exe:
+        print("raylib: no built binary found; run  .\\mr.bat build raylib")
+        return
+
+    for label, args in RAYLIB_CASES:
+        shot = os.path.join(OUT, "raylib-%s.shot" % label)
+        rep = os.path.join(OUT, "raylib-%s.txt" % label)
+        cmd = [exe] + args + ["--frames", str(frames), "--fps", "0",
+                              "--shot", shot, "--report", rep]
+        print("raylib: %s" % label)
+        try:
+            subprocess.run(cmd, cwd=ROOT, timeout=120,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            print("        timed out")
+            continue
+        rows.append(finish("raylib", label, shot, read_report(rep)))
+
+
+def capture_pico(rows, port, baud=115200):
+    try:
+        import serial
+    except ImportError:
+        print("pico: pyserial not installed  (pip install pyserial)")
+        return
+
+    print("pico: opening %s" % port)
+    with serial.Serial(port, baud, timeout=5) as ser:
+        time.sleep(0.3)
+        ser.reset_input_buffer()
+
+        # Collect metrics lines first: the firmware prints them continuously,
+        # and one sample is not worth much when the interesting number is an
+        # average.
+        samples = []
+        deadline = time.time() + 6.0
+        while time.time() < deadline:
+            line = ser.readline().decode("ascii", "replace").strip()
+            if line.startswith("stress ") or line.startswith("game "):
+                samples.append(line)
+        fields = {}
+        if samples:
+            fields = parse_metrics(samples[-1])
+            fps = [float(parse_metrics(s).get("fps", 0)) for s in samples]
+            fps = [v for v in fps if v > 0]
+            if fps:
+                fields["fps_avg"] = "%.2f" % (sum(fps) / len(fps))
+                fields["fps_samples"] = str(len(fps))
+
+        ser.reset_input_buffer()
+        ser.write(b"SHOT\n")
+        ser.flush()
+
+        header = ser.readline()
+        while header and not header.startswith(b"MRSHOT1"):
+            header = ser.readline()
+        if not header:
+            print("pico: no MRSHOT1 header; is MR_PICO_SCREENSHOT enabled?")
+            return
+        nbytes = int(header.split()[3])
+        body = ser.read(nbytes)
+        blob = header + body
+
+    shot = os.path.join(OUT, "pico.shot")
+    with open(shot, "wb") as f:
+        f.write(blob)
+    rows.append(finish("pico", "stress-lace", shot, fields))
+
+
+def parse_metrics(line):
+    out = {}
+    for tok in line.split():
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            out[k] = v
+    return out
+
+
+def finish(platform, label, shot_path, fields):
+    row = {"platform": platform, "case": label}
+    row.update(fields)
+    try:
+        with open(shot_path, "rb") as f:
+            w, h, body = parse_shot(f.read())
+        png = shot_path[:-5] + ".png"
+        write_png(png, rgb565_to_rgb888(body, w, h), w, h)
+        os.remove(shot_path)
+        row["image"] = os.path.basename(png)
+        row["width"], row["height"] = str(w), str(h)
+        print("        -> %s" % os.path.basename(png))
+    except (OSError, ValueError) as exc:
+        row["image"] = "FAILED: %s" % exc
+        print("        capture failed: %s" % exc)
+    return row
+
+
+# --------------------------------------------------------------------------
+
+def write_reports(rows):
+    keys = []
+    for r in rows:
+        for k in r:
+            if k not in keys:
+                keys.append(k)
+
+    with open(os.path.join(OUT, "report.csv"), "w", newline="") as f:
+        wtr = csv.DictWriter(f, fieldnames=keys)
+        wtr.writeheader()
+        wtr.writerows(rows)
+
+    with open(os.path.join(OUT, "report.md"), "w") as f:
+        f.write("# Capture report\n\n")
+        f.write("Generated %s\n\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+        show = [k for k in ("platform", "case", "fps_avg", "sim_hz", "frames",
+                            "sim_ticks", "cpuUs", "flushUs", "sentKB") if
+                any(k in r for r in rows)]
+        f.write("| " + " | ".join(show) + " |\n")
+        f.write("|" + "|".join([" --- "] * len(show)) + "|\n")
+        for r in rows:
+            f.write("| " + " | ".join(str(r.get(k, "")) for k in show) + " |\n")
+        f.write("\n")
+        for r in rows:
+            img = r.get("image", "")
+            if img.endswith(".png"):
+                f.write("### %s / %s\n\n![%s](%s)\n\n" %
+                        (r["platform"], r["case"], r["case"], img))
+        f.write("\n`sim_hz` is the number that should agree across platforms.\n"
+                "Frame rate is expected to differ by orders of magnitude; the\n"
+                "simulation rate should not, because the timestep is fixed.\n")
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(__doc__)
+        return 1
+
+    os.makedirs(OUT, exist_ok=True)
+    rows = []
+
+    i = 1
+    while i < len(argv):
+        what = argv[i]
+        if what == "raylib":
+            capture_raylib(rows)
+        elif what == "pico":
+            if i + 1 >= len(argv):
+                print("pico needs a port, e.g.  pico COM5")
+                return 1
+            i += 1
+            capture_pico(rows, argv[i])
+        else:
+            print("unknown target: %s" % what)
+            return 1
+        i += 1
+
+    if not rows:
+        print("nothing captured")
+        return 1
+
+    write_reports(rows)
+    print("\nwrote %s" % os.path.join(OUT, "report.md"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -53,6 +53,8 @@ typedef struct host_options {
   int scale;
   int sprites;
   int target_fps;
+  const char *shot_path;
+  const char *report_path;
   int frames_limit;
   int autoplay;
   int lace_block_h;
@@ -75,6 +77,66 @@ typedef struct host_state {
 } host_state_t;
 
 static int arg_eq(const char *a, const char *b) { return strcmp(a, b) == 0; }
+
+/* Capture output deliberately matches the Pico's MRSHOT1 serial format: an
+   ASCII header line, then width*height little-endian RGB565 pixels. One
+   parser then reads captures from every platform, and a file written here is
+   byte-comparable with one pulled off hardware. */
+static int write_shot(const char *path, const gfx_color_t *pixels, int w,
+                      int h) {
+  FILE *f;
+  size_t want;
+  size_t got;
+
+  if (!path || !pixels || w <= 0 || h <= 0)
+    return 0;
+
+  f = fopen(path, "wb");
+  if (!f)
+    return 0;
+
+  want = (size_t)w * (size_t)h;
+  fprintf(f, "MRSHOT1 %d %d %lu\n", w, h,
+          (unsigned long)(want * sizeof(gfx_color_t)));
+  got = fwrite(pixels, sizeof(gfx_color_t), want, f);
+  fclose(f);
+  return got == want;
+}
+
+/* Machine-readable run summary. Deliberately key=value on one line per key so
+   it survives being grepped, diffed, or pasted into a spreadsheet without a
+   parser. */
+static int write_report(const char *path, const host_state_t *h,
+                        double elapsed) {
+  FILE *f;
+
+  if (!path || !h)
+    return 0;
+
+  f = fopen(path, "wb");
+  if (!f)
+    return 0;
+
+  fprintf(f, "platform=raylib\n");
+  fprintf(f, "demo=%s\n",
+          h->opt.demo == MR_HOST_DEMO_GAME ? "game" : "stress");
+  fprintf(f, "width=%d\nheight=%d\n", MR_HOST_W, MR_HOST_H);
+  fprintf(f, "tile_h=%d\n", h->opt.tile_h);
+  fprintf(f, "sprites=%d\n", h->opt.sprites);
+  fprintf(f, "fps_cap=%d\n", h->opt.target_fps);
+  fprintf(f, "frames=%lu\n", h->frames);
+  fprintf(f, "elapsed_s=%.4f\n", elapsed);
+  fprintf(f, "fps_avg=%.2f\n",
+          elapsed > 0.0 ? (double)h->frames / elapsed : 0.0);
+  fprintf(f, "sim_ticks=%lu\n", h->sim_ticks);
+  /* Simulation rate is the number that should match across platforms. Frame
+     rate is expected to differ wildly; if this differs, the fixed timestep is
+     not doing its job. */
+  fprintf(f, "sim_hz=%.2f\n",
+          elapsed > 0.0 ? (double)h->sim_ticks / elapsed : 0.0);
+  fclose(f);
+  return 1;
+}
 
 static int parse_int(int argc, char **argv, int *index, int fallback) {
   if (*index + 1 >= argc)
@@ -125,6 +187,8 @@ static void parse_options(int argc, char **argv, host_options_t *opt) {
   opt->scale = MR_RAYLIB_DEFAULT_SCALE;
   opt->sprites = MR_RAYLIB_DEFAULT_SPRITES;
   opt->target_fps = MR_RAYLIB_DEFAULT_FPS;
+  opt->shot_path = 0;
+  opt->report_path = 0;
   opt->frames_limit = 0;
   opt->autoplay = MR_RAYLIB_DEFAULT_AUTOPLAY ? 1 : 0;
   opt->lace_block_h = MR_RAYLIB_DEFAULT_LACE_BLOCK_H;
@@ -154,6 +218,12 @@ static void parse_options(int argc, char **argv, host_options_t *opt) {
       opt->lace_block_h = parse_int(argc, argv, &i, opt->lace_block_h);
     } else if (arg_eq(argv[i], "--autoplay")) {
       opt->autoplay = 1;
+    } else if (arg_eq(argv[i], "--shot") && i + 1 < argc) {
+      ++i;
+      opt->shot_path = argv[i];
+    } else if (arg_eq(argv[i], "--report") && i + 1 < argc) {
+      ++i;
+      opt->report_path = argv[i];
     }
   }
 
@@ -459,6 +529,11 @@ int main(int argc, char **argv) {
         host.frames >= (unsigned long)host.opt.frames_limit)
       break;
   }
+
+  if (host.opt.shot_path)
+    (void)write_shot(host.opt.shot_path, host.frame, MR_HOST_W, MR_HOST_H);
+  if (host.opt.report_path)
+    (void)write_report(host.opt.report_path, &host, GetTime() - host.start_time);
 
   host.texture_ready = 0;
   UnloadTexture(texture);

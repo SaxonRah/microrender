@@ -52,6 +52,7 @@ CMake. DOS accepts only its documented aliases.
 | `scripts/mr_frmctr_sweep.bat` | builds one Pico image per ILI9341 panel-refresh setting |
 | `scripts/mr_test_raylib.bat` | runs the Raylib frontend across the demo/mode/tile matrix for a fixed frame count |
 | `scripts/mr_test_dos.bat` | builds the DOS frontend across its option matrix, optionally running each in DOSBox |
+| `scripts/mr_capture.py` | captures screenshots and metrics from each frontend into one report |
 | `scripts/mr_preset_flags.py` | reads Pico preset cache variables and binary directories |
 | `microrender/pico_env_auto.bat` | Pico SDK/toolchain/Ninja environment discovery |
 | `microrender_dos/build_watcom*.bat` | low-level 16-bit compiler/linker commands |
@@ -160,6 +161,37 @@ and far pointers, so shared code that compiles and passes tests everywhere else
 can still fail there -- pointer arithmetic assuming a flat address space, or an
 `int` that overflows at 32,767. CI does not cover it, because Open Watcom is
 not installed on the runners.
+
+## Capture harness
+
+```powershell
+python scripts\mr_capture.py raylib
+python scripts\mr_capture.py pico COM5
+python scripts\mr_capture.py raylib pico COM5
+```
+
+Writes PNGs plus `report.md` and `report.csv` into `capture/`.
+
+Every platform emits the same format, so one parser reads all of them and a
+file written by the Raylib frontend is byte-comparable with one pulled off a
+Pico over USB:
+
+```text
+MRSHOT1 <width> <height> <bytes>
+<width*height little-endian RGB565 pixels>
+```
+
+The Pico already spoke this over USB serial; `--shot PATH` and `--report PATH`
+were added to the Raylib frontend to match. DOS has no capture yet -- it needs
+real-mode file output in the frontend, which is the remaining piece.
+
+Only the standard library is needed for Raylib capture, including PNG encoding.
+Pico capture needs `pyserial`.
+
+The column worth reading in the report is `sim_hz`, not `fps_avg`. Frame rate
+is expected to differ by orders of magnitude between a Pico and an uncapped
+desktop window; the simulation rate is not, because the timestep is fixed. If
+`sim_hz` disagrees across platforms, the decoupling is broken somewhere.
 
 ## Raylib submodule behavior
 

@@ -19,3 +19,4 @@ microrender_dos/dosroot/GAME.MRP
 *.avi
 /microrender/.vscode
 build-frmctr-sweep/
+capture/
