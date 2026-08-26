@@ -50,6 +50,8 @@ CMake. DOS accepts only its documented aliases.
 | `scripts/mr_tools.bat` | CMake, Open Watcom, and DOSBox discovery |
 | `scripts/mr_clean.bat` | build-output cleanup |
 | `scripts/mr_frmctr_sweep.bat` | builds one Pico image per ILI9341 panel-refresh setting |
+| `scripts/mr_test_raylib.bat` | runs the Raylib frontend across the demo/mode/tile matrix for a fixed frame count |
+| `scripts/mr_test_dos.bat` | builds the DOS frontend across its option matrix, optionally running each in DOSBox |
 | `scripts/mr_preset_flags.py` | reads Pico preset cache variables and binary directories |
 | `microrender/pico_env_auto.bat` | Pico SDK/toolchain/Ninja environment discovery |
 | `microrender_dos/build_watcom*.bat` | low-level 16-bit compiler/linker commands |
@@ -113,6 +115,36 @@ that directory.
 
 The directory is also wiped when the generator, toolchain, source path, or
 build path no longer match the cache.
+
+## Frontend smoke tests
+
+The host suites (`mr.bat test`) check rendering output but never construct a
+frontend, so they cannot catch a demo/mode/tile combination that fails to
+start. Two scripts cover that gap.
+
+```powershell
+.\scripts\mr_test_raylib.bat        rem 120 frames per combination
+.\scripts\mr_test_raylib.bat 600    rem longer runs
+```
+
+Fourteen combinations across both demos, every presentation mode, several tile
+heights, and the sprite-count edges. `--frames N` closes each window on its own
+so the matrix runs unattended, and each combination is reported pass or fail
+with a summary at the end.
+
+```powershell
+.\scripts\mr_test_dos.bat           rem build only
+.\scripts\mr_test_dos.bat run       rem also launch each in DOSBox
+```
+
+Seven builds across `raw`/`tiled`/`both`, tile heights, and vsync. Build-only by
+default because running needs DOSBox and is not unattended.
+
+DOS is the target most worth exercising. It is the only build with 16-bit `int`
+and far pointers, so shared code that compiles and passes tests everywhere else
+can still fail there -- pointer arithmetic assuming a flat address space, or an
+`int` that overflows at 32,767. CI does not cover it, because Open Watcom is
+not installed on the runners.
 
 ## Raylib submodule behavior
 
