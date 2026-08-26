@@ -1399,7 +1399,7 @@ void mr_pico_stress_demo_main(void) {
           "stress frame=%lu fps=%lu.%lu avg=%lu.%lu spr=%lu vis=%lu b=%lu "
           "d=%lu rn=%lu px=%lu col=%lu/%lu mode=%d fixed=%d tri=%d frameUs=%lu "
           "cpuUs=%lu flushUs=%lu sentKB=%lu dirty=%lu.%lu%% spans=%lu sys=%lu "
-          "peri=%lu spi=%u serial=%d\n",
+          "peri=%lu spi=%u serial=%d core1=%d lace=%d phases=%d\n",
           frame_counter, fps10 / 10ul, fps10 % 10ul, avg_fps10 / 10ul,
           avg_fps10 % 10ul, m.sprite_count, m.sprites_visible, m.bucket_items,
           m.sprites_drawn, m.rle_runs_drawn, m.rle_pixels_copied,
@@ -1409,7 +1409,8 @@ void mr_pico_stress_demo_main(void) {
           dirty_pct10 % 10ul, stress_dirty_spans,
           (unsigned long)clock_get_hz(clk_sys),
           (unsigned long)clock_get_hz(clk_peri), (unsigned)lcd.spi_baud_hz,
-          MR_STRESS_PICO_SERIAL);
+          MR_STRESS_PICO_SERIAL, MR_LACE_CORE1,
+          MR_STRESS_PICO_LACE_BLOCK_H, MR_STRESS_LACE_PHASES);
 
       last_fps_frame = frame_counter;
       last_fps_ms = now;

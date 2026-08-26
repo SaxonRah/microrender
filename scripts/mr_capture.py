@@ -12,7 +12,13 @@ Usage
 -----
     python scripts/mr_capture.py raylib                 run the Raylib matrix
     python scripts/mr_capture.py pico COM5              capture from a Pico
+    python scripts/mr_capture.py pico COM5 stress-raw   expect a different preset
     python scripts/mr_capture.py raylib pico COM5       both
+
+Pico capture talks to whatever firmware happens to be flashed, which is not
+necessarily the firmware you last built. The reported configuration is checked
+against the named preset (default stress-lace) and the capture is refused on a
+mismatch, rather than filing a screenshot under the wrong label.
 
 Output lands in capture/ as PNGs plus report.md and report.csv.
 
@@ -146,7 +152,72 @@ def capture_raylib(rows, frames=600):
         rows.append(finish("raylib", label, shot, read_report(rep)))
 
 
-def capture_pico(rows, port, baud=115200):
+# Metrics field -> the preset flag that determines it. Only fields the firmware
+# actually reports can be checked.
+PICO_EXPECT = {
+    "mode": ("MR_STRESS_MODE",
+             {"visible": "0", "raw": "1", "dirty": "2", "dirtyfixed": "3",
+              "render": "4", "lcdtest": "5", "lace": "6", "lacefixed": "7"}),
+    "spr": ("MR_STRESS_SPRITES", None),
+    "spi": ("MR_LCD_SPI_BAUD", None),
+    "lace": ("MR_STRESS_LACE_BLOCK_H", None),
+    "phases": ("MR_STRESS_LACE_PHASES", None),
+    "core1": ("MR_PICO_PRESENT_CORE1", {"ON": "1", "OFF": "0"}),
+}
+
+
+def preset_flags(preset):
+    """Resolve a preset to its -D flags with the project's own script, so this
+    cannot drift from what the build actually does."""
+    script = os.path.join(ROOT, "scripts", "mr_preset_flags.py")
+    try:
+        out = subprocess.run([sys.executable, script, "microrender", preset],
+                             cwd=ROOT, capture_output=True, text=True,
+                             timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        cannot resolve preset %s: %s" % (preset, exc))
+        return None
+    if out.returncode != 0:
+        print("        cannot resolve preset %s: %s"
+              % (preset, out.stderr.strip()))
+        return None
+    flags = {}
+    for tok in out.stdout.split():
+        if tok.startswith("-D") and "=" in tok:
+            k, v = tok[2:].split("=", 1)
+            flags[k] = v
+    return flags
+
+
+def check_pico_config(fields, preset):
+    """Mismatches between the running firmware and a preset. Empty means it
+    matches."""
+    flags = preset_flags(preset)
+    if flags is None:
+        return ["could not resolve preset %s" % preset]
+
+    problems = []
+    for field, (flag, mapping) in PICO_EXPECT.items():
+        if field not in fields:
+            # Firmware older than the core1/lace/phases metrics fields.
+            continue
+        want = flags.get(flag)
+        if want is None:
+            continue
+        if mapping:
+            want = mapping.get(want, want)
+        got = fields[field]
+        try:
+            same = int(got) == int(want)
+        except ValueError:
+            same = str(got) == str(want)
+        if not same:
+            problems.append("%s: firmware reports %s, preset %s wants %s"
+                            % (field, got, preset, want))
+    return problems
+
+
+def capture_pico(rows, port, preset="stress-lace", baud=115200):
     try:
         import serial
     except ImportError:
@@ -176,6 +247,21 @@ def capture_pico(rows, port, baud=115200):
                 fields["fps_avg"] = "%.2f" % (sum(fps) / len(fps))
                 fields["fps_samples"] = str(len(fps))
 
+        if not fields:
+            print("pico: no metrics line seen. Is this a serial=ON build, and\n"
+                  "      is the firmware actually running?")
+            return
+
+        problems = check_pico_config(fields, preset)
+        if problems:
+            print("pico: flashed firmware does not match preset '%s':" % preset)
+            for pb in problems:
+                print("        %s" % pb)
+            print("      Refusing to capture. Build and flash it first:")
+            print("        .\\mr.bat build pico %s serial=ON" % preset)
+            return
+        print("        firmware matches %s" % preset)
+
         ser.reset_input_buffer()
         ser.write(b"SHOT\n")
         ser.flush()
@@ -193,7 +279,7 @@ def capture_pico(rows, port, baud=115200):
     shot = os.path.join(OUT, "pico.shot")
     with open(shot, "wb") as f:
         f.write(blob)
-    rows.append(finish("pico", "stress-lace", shot, fields))
+    rows.append(finish("pico", preset, shot, fields))
 
 
 def parse_metrics(line):
@@ -276,7 +362,12 @@ def main(argv):
                 print("pico needs a port, e.g.  pico COM5")
                 return 1
             i += 1
-            capture_pico(rows, argv[i])
+            port = argv[i]
+            preset = "stress-lace"
+            if i + 1 < len(argv) and argv[i + 1] not in ("raylib", "pico"):
+                i += 1
+                preset = argv[i]
+            capture_pico(rows, port, preset)
         else:
             print("unknown target: %s" % what)
             return 1

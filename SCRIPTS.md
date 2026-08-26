@@ -167,8 +167,29 @@ not installed on the runners.
 ```powershell
 python scripts\mr_capture.py raylib
 python scripts\mr_capture.py pico COM5
+python scripts\mr_capture.py pico COM5 stress-raw
 python scripts\mr_capture.py raylib pico COM5
 ```
+
+Pico capture talks to whatever firmware happens to be flashed, which is not
+necessarily what you last built -- and a screenshot filed under the wrong label
+is worse than no screenshot. Before capturing, the running firmware's reported
+configuration is checked against the named preset (default `stress-lace`) and
+the capture is refused on a mismatch:
+
+```text
+pico: flashed firmware does not match preset 'stress-lace':
+        spr: firmware reports 512, preset stress-lace wants 1024
+        core1: firmware reports 0, preset stress-lace wants 1
+      Refusing to capture. Build and flash it first:
+        .\mr.bat build pico stress-lace serial=ON
+```
+
+Expected values come from `mr_preset_flags.py`, the same script the build uses,
+so the check cannot drift from what a preset actually produces. The firmware
+metrics line reports `core1`, `lace` and `phases` alongside the existing `mode`,
+`spr` and `spi` so the comparison covers the settings that change what is on
+screen.
 
 Writes PNGs plus `report.md` and `report.csv` into `capture/`.
 
