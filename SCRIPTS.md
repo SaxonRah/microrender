@@ -123,14 +123,29 @@ frontend, so they cannot catch a demo/mode/tile combination that fails to
 start. Two scripts cover that gap.
 
 ```powershell
-.\scripts\mr_test_raylib.bat        rem 120 frames per combination
-.\scripts\mr_test_raylib.bat 600    rem longer runs
+.\scripts\mr_test_raylib.bat          rem smoke test, 120 frames each
+.\scripts\mr_test_raylib.bat 600      rem longer smoke runs
+.\scripts\mr_test_raylib.bat watch    rem visual check, 60 FPS cap
+.\scripts\mr_test_raylib.bat watch 0  rem visual check, uncapped
 ```
 
 Fourteen combinations across both demos, every presentation mode, several tile
-heights, and the sprite-count edges. `--frames N` closes each window on its own
-so the matrix runs unattended, and each combination is reported pass or fail
-with a summary at the end.
+heights, and the sprite-count edges, each reported pass or fail with a summary
+at the end.
+
+The default mode runs uncapped with `--frames`, so every case is over in
+milliseconds. That is what you want for checking that nothing crashes, and
+useless for looking at anything.
+
+`watch` passes no `--frames`, so each window stays open until you close it, and
+closing advances to the next case. It caps at 60 FPS by default so motion runs
+at its intended speed.
+
+Running the same case as `watch 60` and `watch 0` is the most direct check that
+frame rate and simulation rate are actually separate: since the simulation is
+on a fixed timestep, an uncapped window renders far more frames but the game
+must move at exactly the same speed. If the uncapped run is faster, the
+timestep decoupling is broken somewhere.
 
 ```powershell
 .\scripts\mr_test_dos.bat           rem build only

@@ -8,22 +8,51 @@ rem suites are what actually check rendering output; this checks that every
 rem combination of options still starts, runs, and exits 0 -- which is the
 rem failure the unit tests cannot see, because they never construct a frontend.
 rem
-rem --frames N makes the window close by itself, so the whole matrix runs
-rem unattended. --fps 0 removes the frame cap so it finishes quickly.
+rem Two modes:
 rem
-rem Usage:  mr_test_raylib.bat [frames]        (default 120)
+rem   mr_test_raylib.bat [frames]
+rem       Unattended smoke test. Each combination runs [frames] frames
+rem       uncapped and exits on its own. Fast, and useful for checking that
+rem       nothing crashes, but far too quick to look at.
+rem
+rem   mr_test_raylib.bat watch [fps]
+rem       Visual check. Each combination opens with no frame limit and stays
+rem       open until you close the window; closing it advances to the next.
+rem       Defaults to a 60 FPS cap so motion is watchable.
+rem
+rem       Pass 0 for fps to run uncapped. Since the simulation is on a fixed
+rem       timestep, an uncapped window should move at exactly the same speed as
+rem       a capped one -- running the same case both ways is the most direct
+rem       check that frame rate and simulation rate are actually separated.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "MR_ROOT=%~dp0.."
 pushd "%MR_ROOT%" >nul || (echo ERROR: cannot enter repo root & exit /b 1)
 
-set "FRAMES=%~1"
-if "%FRAMES%"=="" set "FRAMES=120"
+set "MODE=smoke"
+set "FRAMES=120"
+set "CAP=60"
+if /i "%~1"=="watch" (
+    set "MODE=watch"
+    if not "%~2"=="" set "CAP=%~2"
+) else (
+    if not "%~1"=="" set "FRAMES=%~1"
+)
 
 set "PASS=0"
 set "FAIL=0"
 set "FAILED="
+
+if /i "%MODE%"=="watch" (
+    echo [raylib] watch mode: close each window to advance to the next case.
+    if "%CAP%"=="0" (
+        echo [raylib] uncapped -- speed should match the capped run exactly.
+    ) else (
+        echo [raylib] capped at %CAP% FPS.
+    )
+    echo.
+)
 
 echo [raylib] building frontend ...
 call "%MR_ROOT%\mr.bat" build raylib
@@ -68,8 +97,27 @@ set "ARGS=!ARGS! %~1"
 shift /1
 goto run_collect
 :run_go
+if /i "%MODE%"=="watch" goto run_watch
+
 echo [raylib] !LABEL!
 call "%MR_ROOT%\mr.bat" run raylib !ARGS! --frames %FRAMES% --fps 0 >nul 2>&1
+if errorlevel 1 (
+    echo          FAILED ^(exit !ERRORLEVEL!^)
+    set /a FAIL+=1
+    set "FAILED=!FAILED! [!LABEL!]"
+) else (
+    set /a PASS+=1
+)
+exit /b 0
+
+:run_watch
+rem No --frames, so the window stays up until closed. Output is not redirected
+rem here: in watch mode you want to see whatever the frontend prints.
+echo.
+echo ------------------------------------------------------------
+echo [raylib] !LABEL!      ^(close the window to continue^)
+echo ------------------------------------------------------------
+call "%MR_ROOT%\mr.bat" run raylib !ARGS! --fps %CAP%
 if errorlevel 1 (
     echo          FAILED ^(exit !ERRORLEVEL!^)
     set /a FAIL+=1
