@@ -221,63 +221,46 @@ def check_pico_config(fields, preset):
 def capture_dos(rows, frames=900):
     """Run the DOS build under DOSBox and collect its capture.
 
-    The frontend writes the same MRSHOT1 file the other platforms do, into the
-    mounted working directory, so nothing here needs to know it came from DOS.
+    Goes through mr.bat rather than invoking DOSBox directly: the runner
+    already locates DOSBox, writes a config with machine=vgaonly so Mode X is
+    emulated on real VGA rather than an SVGA compatibility layer, and mounts
+    dosroot as C:. Duplicating any of that here would drift.
+
+    MR_DOSBOX_NOPAUSE drops the "press any key" so this is unattended.
+    MR_DOSBOX_CYCLES is worth setting for a quotable number: the default is
+    cycles=max, which measures the host CPU rather than any period machine.
     """
-    exe = None
-    for cand in ("mrender.exe", "MRENDER.EXE"):
-        for sub in ("microrender_dos", "microrender_dos/bin",
-                    "microrender_dos/build"):
-            p = os.path.join(ROOT, sub, cand)
-            if os.path.exists(p):
-                exe = p
-                break
-        if exe:
-            break
-    if not exe:
-        print("dos: no mrender.exe found; run  .\\mr.bat build dos mode=both")
+    dosroot = os.path.join(ROOT, "microrender_dos", "dosroot")
+    dist = os.path.join(ROOT, "microrender_dos", "dist")
+    if not (os.path.exists(os.path.join(dosroot, "mrender.exe")) or
+            os.path.exists(os.path.join(dist, "mrender.exe"))):
+        print("dos: mrender.exe not in dosroot\\ or dist\\; run")
+        print("       .\\mr.bat build dos mode=both tile=16 vsync=0")
         return
 
-    dosbox = None
-    for cand in ("dosbox-x", "dosbox"):
-        for probe in (cand, cand + ".exe"):
-            try:
-                subprocess.run([probe, "-version"], capture_output=True,
-                               timeout=10)
-                dosbox = probe
-                break
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-        if dosbox:
-            break
-    if not dosbox:
-        print("dos: DOSBox not on PATH; run it yourself with:")
-        print("       mrender /auto /frames %d /shot dos.shot /report dos.txt"
-              % frames)
-        return
-
-    workdir = os.path.dirname(exe)
-    shot = os.path.join(workdir, "dos.shot")
-    rep = os.path.join(workdir, "dos.txt")
+    shot = os.path.join(dosroot, "dos.shot")
+    rep = os.path.join(dosroot, "dos.txt")
     for stale in (shot, rep):
         if os.path.exists(stale):
             os.remove(stale)
 
-    cmd = [dosbox, "-noconsole", "-exit", "-c", "MOUNT C \"%s\"" % workdir,
-           "-c", "C:", "-c",
-           "%s /auto /frames %d /shot dos.shot /report dos.txt"
-           % (os.path.basename(exe).split(".")[0], frames),
-           "-c", "EXIT"]
-    print("dos: running under %s" % dosbox)
+    env = dict(os.environ)
+    env["MR_DOSBOX_NOPAUSE"] = "1"
+    cmd = [os.path.join(ROOT, "mr.bat"), "run", "dos", "/auto",
+           "/frames", str(frames), "/shot", "dos.shot", "/report", "dos.txt"]
+    print("dos: running under DOSBox (cycles=%s)"
+          % env.get("MR_DOSBOX_CYCLES", "max"))
     try:
-        subprocess.run(cmd, cwd=workdir, timeout=300,
+        subprocess.run(cmd, cwd=ROOT, env=env, timeout=300,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        print("        timed out")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        could not run: %s" % exc)
         return
 
     if not os.path.exists(shot):
-        print("        no capture produced; check the DOSBox window manually")
+        print("        no capture produced. Try it by hand to see the error:")
+        print("       .\\mr.bat run dos /auto /frames %d /shot dos.shot"
+              % frames)
         return
 
     dest = os.path.join(OUT, "dos-game.shot")
@@ -285,6 +268,8 @@ def capture_dos(rows, frames=900):
     fields = read_report(rep)
     if os.path.exists(rep):
         os.remove(rep)
+    if "cycles" not in fields:
+        fields["cycles"] = env.get("MR_DOSBOX_CYCLES", "max")
     rows.append(finish("dos", "game", dest, fields))
 
 

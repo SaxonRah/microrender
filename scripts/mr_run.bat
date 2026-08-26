@@ -170,8 +170,12 @@ rem emulation instead of routing it through an SVGA compatibility layer.
 >>"%CONF%" echo echo MicroRender: %EXE% !DOSARGS!  [cycles=%CYCLES%]
 >>"%CONF%" echo %EXE% !DOSARGS!
 >>"%CONF%" echo echo.
->>"%CONF%" echo echo Finished. Press any key to close DOSBox.
->>"%CONF%" echo pause
+rem Capture scripts need this unattended. MR_DOSBOX_NOPAUSE=1 drops the
+rem keypress so DOSBox closes on its own once the program returns.
+if not "%MR_DOSBOX_NOPAUSE%"=="1" (
+    >>"%CONF%" echo echo Finished. Press any key to close DOSBox.
+    >>"%CONF%" echo pause
+)
 >>"%CONF%" echo exit
 
 echo Launching %EXE% !DOSARGS! (cycles=%CYCLES%)

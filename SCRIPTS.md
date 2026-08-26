@@ -213,12 +213,23 @@ complete frame, and 150 KiB is more than a real-mode program should allocate
 just to save a picture. Swapping the flush callback re-renders the scene into
 the existing tile buffer and writes each strip as it is produced.
 
-DOS capture needs DOSBox on PATH. Without it the script prints the command to
-run by hand:
+DOS capture goes through `mr.bat run dos`, so it reuses the runner's DOSBox
+config -- `machine=vgaonly` keeps Mode X on real VGA emulation rather than an
+SVGA compatibility layer -- and mounts `dosroot` as C:. `MR_DOSBOX_NOPAUSE=1`
+drops the "press any key" so it is unattended; the runner honours that
+generally, not just here.
 
-```text
-mrender /auto /frames 900 /shot dos.shot /report dos.txt
+Set `MR_DOSBOX_CYCLES` for a quotable number. The default is `cycles=max`,
+which measures the host CPU rather than any period machine, so a DOS FPS
+captured with it says more about your desktop than about a 386:
+
+```powershell
+$env:MR_DOSBOX_CYCLES = "fixed 3000"   # ~386DX/33
+python scripts\mr_capture.py dos
 ```
+
+The cycles setting is recorded in the report, since a DOS frame rate without it
+is not meaningful.
 
 Only the standard library is needed for Raylib capture, including PNG encoding.
 Pico capture needs `pyserial`.
