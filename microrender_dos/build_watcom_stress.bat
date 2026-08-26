@@ -71,6 +71,7 @@ if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_stress_test.c "%OBJDIR%\mr_stress_test.obj" "%ERRDIR%\mr_stress_test.err"
 if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_strbuf.c "%OBJDIR%\mr_strbuf.obj" "%ERRDIR%\mr_strbuf.err"
+call :compile ..\shared\src\mr_timestep.c "%OBJDIR%\mr_timestep.obj" "%ERRDIR%\mr_timestep.err"
 if errorlevel 1 goto fail
 call :compile dos\dos_vga.c "%OBJDIR%\dos_vga.obj" "%ERRDIR%\dos_vga.err"
 if errorlevel 1 goto fail
@@ -85,6 +86,7 @@ echo Linking %EXE%...
   "%OBJDIR%\gfx_triangle.obj" ^
   "%OBJDIR%\gfx_engine.obj" ^
   "%OBJDIR%\mr_strbuf.obj" ^
+  "%OBJDIR%\mr_timestep.obj" ^
   "%OBJDIR%\dos_vga.obj" ^
   "%OBJDIR%\mr_stress_test.obj" > "%ERRDIR%\link.err" 2>&1
 if errorlevel 1 (

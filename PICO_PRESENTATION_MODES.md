@@ -103,11 +103,16 @@ scene-dependent and the preset uses 512 sprites with 16-row tiles.
 
 Two cautions before reading anything else in this document as a result.
 
-`mr_stress_tick()` advances one step per frame and takes no delta time, so
-sprites move about 45% faster at 110 FPS than at 77. Comparing two presentation
-modes side by side, the faster one *looks* smoother largely because the
-simulation is running quicker. That is a property of the benchmark, not of the
-renderer, and it is easy to mistake for a rendering improvement.
+The simulation now runs on a fixed 60 Hz timestep driven by wall-clock time, so
+sprites move at the same speed at 110 FPS as at 55. Comparing presentation
+modes, a difference in motion speed is no longer available to be mistaken for a
+difference in smoothness.
+
+Before that change the tick ran once per rendered frame, which made the
+1,024-sprite scene move about 45% faster at 110 FPS than at 77. Any measurement
+in this document taken before then reflects that; the frame timings are
+unaffected, since rasterization and transfer dominate and actor movement is a
+few percent of `cpuUs`.
 
 Judged with that in mind, the visible difference between 77 and 110 FPS on this
 hardware is small: no difference in the background, and possibly a slight

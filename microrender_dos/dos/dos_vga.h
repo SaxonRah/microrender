@@ -32,6 +32,11 @@ void dos_vga_set_rgb332_palette(void);
 void dos_vga_wait_vblank(void);
 unsigned long dos_vga_ticks(void);
 
+/* Microseconds since boot, at roughly 838 ns resolution, by combining the
+   18.2 Hz BIOS tick with a latched read of PIT channel 0. Wraps about every
+   71 minutes, which is harmless for frame deltas. */
+unsigned long dos_vga_micros(void);
+
 void dos_vga_flush_tile(gfx_renderer_t GFX_PTR *r, int x, int y, int w, int h,
                         const gfx_color_t GFX_PTR *pixels,
                         void GFX_PTR *user);

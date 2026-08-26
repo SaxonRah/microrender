@@ -77,6 +77,7 @@ add_executable(microrender_raylib
     "${MR_SHARED_SRC}/gfx_engine.c"
     "${MR_SHARED_SRC}/gfx_font5x7.c"
     "${MR_SHARED_SRC}/gfx_triangle.c"
+    "${MR_SHARED_SRC}/mr_timestep.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
     "${MR_SHARED_SRC}/mr_autodemo.c"
     "${MR_SHARED_SRC}/mr_game_demo.c"

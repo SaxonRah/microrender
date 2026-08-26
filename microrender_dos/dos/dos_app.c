@@ -33,6 +33,7 @@
 #include "mr_game_demo.h"
 #include "dos_keyboard.h"
 #include "dos_vga.h"
+#include "mr_timestep.h"
 
 #ifndef __WATCOMC__
 #error This DOS frontend expects Open Watcom for the 16-bit DOS target.
@@ -69,6 +70,8 @@ typedef struct dos_options {
   int show_help;
   int vsync;
 } dos_options_t;
+
+static mr_timestep_t dos_step;
 
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
 static mr_game_demo_t dos_game;
@@ -395,6 +398,7 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   mr_autodemo_reset();
 
   frame = 0UL;
+  mr_timestep_init(&dos_step, 60, 5);
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
   fps_frame = 0UL;
@@ -408,7 +412,11 @@ static int dos_run_shared_game(const dos_options_t *opt) {
       dos_read_keyboard_input(&input);
     }
 
-    mr_game_demo_tick(&dos_game, &input);
+    {
+      int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
+      while (steps-- > 0)
+        mr_game_demo_tick(&dos_game, &input);
+    }
     gfx_render_tiled(&dos_renderer, dos_draw_game_scene, &dos_game,
                      GFX_RGB565_BLACK);
 #if MR_DOS_PRESENT_MODE == 0

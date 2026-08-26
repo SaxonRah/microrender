@@ -78,6 +78,7 @@ if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_game_demo.c "%OBJDIR%\mr_game_demo.obj" "%ERRDIR%\mr_game_demo.err"
 if errorlevel 1 goto fail
 call :compile ..\shared\src\mr_strbuf.c "%OBJDIR%\mr_strbuf.obj" "%ERRDIR%\mr_strbuf.err"
+call :compile ..\shared\src\mr_timestep.c "%OBJDIR%\mr_timestep.obj" "%ERRDIR%\mr_timestep.err"
 if errorlevel 1 goto fail
 call :compile dos\dos_main.c "%OBJDIR%\dos_main.obj" "%ERRDIR%\dos_main.err"
 if errorlevel 1 goto fail
@@ -101,7 +102,8 @@ if "%PACKOBJ%"=="" (
      "%OBJDIR%\gfx_engine.obj" ^
      "%OBJDIR%\mr_autodemo.obj" ^
      "%OBJDIR%\mr_game_demo.obj" ^
-     "%OBJDIR%\mr_strbuf.obj" > "%ERRDIR%\link.err" 2>&1
+     "%OBJDIR%\mr_strbuf.obj" ^
+     "%OBJDIR%\mr_timestep.obj" > "%ERRDIR%\link.err" 2>&1
 ) else (
     "%OW_WCL%" %LFLAGS% -fe="%EXE%" ^
      "%OBJDIR%\dos_main.obj" ^
@@ -115,7 +117,8 @@ if "%PACKOBJ%"=="" (
      "%PACKOBJ%" ^
      "%OBJDIR%\mr_autodemo.obj" ^
      "%OBJDIR%\mr_game_demo.obj" ^
-     "%OBJDIR%\mr_strbuf.obj" > "%ERRDIR%\link.err" 2>&1
+     "%OBJDIR%\mr_strbuf.obj" ^
+     "%OBJDIR%\mr_timestep.obj" > "%ERRDIR%\link.err" 2>&1
 )
 if errorlevel 1 (
     type "%ERRDIR%\link.err"

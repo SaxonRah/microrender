@@ -9,6 +9,7 @@
 #include "gfx.h"
 #include "mr_stress_test.h"
 #include "dos_vga.h"
+#include "mr_timestep.h"
 
 #define DOS_SCREEN_W 320
 #define DOS_SCREEN_H 240
@@ -23,6 +24,8 @@
 #define MR_DOS_PRESENT_MODE 1 /* 0 raw full-frame staging, 1 direct tiled */
 #endif
 #define DOS_FRAME_PIXELS ((long)DOS_SCREEN_W * (long)DOS_SCREEN_H)
+
+static mr_timestep_t dos_step;
 
 static gfx_renderer_t dos_renderer;
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
@@ -177,6 +180,7 @@ int main(int argc, char **argv) {
   mr_stress_init(&stress, &cfg);
 
   dos_vga_enter();
+  mr_timestep_init(&dos_step, 60, 5);
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
   fps_frame = 0;
@@ -189,7 +193,11 @@ int main(int argc, char **argv) {
     int saved_flush;
     saved_flush = dos_vga_flush_enabled();
     dos_vga_set_flush_enabled(1);
-    mr_stress_tick(&stress);
+    {
+      int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
+      while (steps-- > 0)
+        mr_stress_tick(&stress);
+    }
 #if MR_DOS_PRESENT_MODE == 0
     gfx_render_tiled(&dos_renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
     dos_vga_present_rgb565_frame(dos_raw_frame);
@@ -215,7 +223,11 @@ int main(int argc, char **argv) {
         break;
     }
 
-    mr_stress_tick(&stress);
+    {
+      int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
+      while (steps-- > 0)
+        mr_stress_tick(&stress);
+    }
 #if MR_DOS_PRESENT_MODE == 0
     /* Raw reference: clear/draw every logical pixel, then upload the whole
        completed frame. No tile is presented while rasterization is active. */

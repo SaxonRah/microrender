@@ -4,6 +4,7 @@
 #include "mr_autodemo.h"
 #include "mr_demo_input.h"
 #include "mr_game_demo.h"
+#include "mr_timestep.h"
 #include "mr_stress_test.h"
 
 #include <stdio.h>
@@ -69,6 +70,7 @@ typedef struct host_state {
   int texture_ready;
   unsigned long frames;
   double start_time;
+  mr_timestep_t step;
 } host_state_t;
 
 static int arg_eq(const char *a, const char *b) { return strcmp(a, b) == 0; }
@@ -358,6 +360,10 @@ int main(int argc, char **argv) {
     mr_autodemo_reset();
   }
 
+  /* 60 Hz simulation, at most 5 steps per frame. Raylib is uncapped by
+     default, so without this the demo runs at whatever rate the GPU happens to
+     manage -- thousands of frames a second on a desktop. */
+  mr_timestep_init(&host.step, 60, 5);
   host.start_time = GetTime();
   printf("MicroRender Raylib: 320x240 RGB565 demo=%s mode=%s tile=%d sprites=%d\n",
          host.opt.demo == MR_HOST_DEMO_GAME ? "game" : "stress",
@@ -396,11 +402,21 @@ int main(int argc, char **argv) {
         mr_autodemo_input(host.frames, &input);
       else
         host_input(&input);
-      mr_game_demo_tick(&host.game, &input);
+      {
+        int steps = mr_timestep_advance(&host.step,
+                                        (unsigned long)(GetTime() * 1000000.0));
+        while (steps-- > 0)
+          mr_game_demo_tick(&host.game, &input);
+      }
       if (mr_game_demo_quit_requested(&host.game))
         break;
     } else {
-      mr_stress_tick(&host.stress);
+      {
+        int steps = mr_timestep_advance(&host.step,
+                                        (unsigned long)(GetTime() * 1000000.0));
+        while (steps-- > 0)
+          mr_stress_tick(&host.stress);
+      }
     }
 
     if (host.opt.demo == MR_HOST_DEMO_GAME) {

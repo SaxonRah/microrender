@@ -3,6 +3,7 @@
 #include "gfx.h"
 #include "mr_autodemo.h"
 #include "mr_game_demo.h"
+#include "mr_timestep.h"
 #include "mr_pico_ili9341.h"
 #include "mr_pico_screenshot.h"
 
@@ -39,6 +40,7 @@ static gfx_color_t tile_buffer_b[MR_SCREEN_W * MR_TILE_H];
 #endif
 static gfx_renderer_t renderer;
 static mr_game_demo_t game_demo;
+static mr_timestep_t demo_step;
 static mr_pico_screenshot_t screenshot_service;
 
 static mr_pico_ili9341_t lcd = {
@@ -113,9 +115,16 @@ void mr_pico_demo_main(void) {
   last_fps_ms = start_fps_ms;
   mr_game_demo_set_fps10(&game_demo, 0ul, 0ul);
 
+  mr_timestep_init(&demo_step, 60, 5);
+
+
   for (;;) {
     mr_autodemo_input(frame_counter, &input);
-    mr_game_demo_tick(&game_demo, &input);
+    {
+      int steps = mr_timestep_advance(&demo_step, (unsigned long)time_us_32());
+      while (steps-- > 0)
+        mr_game_demo_tick(&game_demo, &input);
+    }
 
 #if MR_GAME_PRESENT_MODE == 0
     /* Baseline path kept intentionally: clear/draw the complete frame, then

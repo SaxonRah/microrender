@@ -9,6 +9,7 @@
 #endif
 #include "mr_strbuf.h"
 #include "gfx.h"
+#include "mr_timestep.h"
 #include "hardware/clocks.h"
 #include "hardware/pll.h"
 #include "hardware/regs/clocks.h"
@@ -221,6 +222,7 @@ static void lace_present_sync(void);
 static void lace_core1_main(void);
 #endif
 
+static mr_timestep_t stress_step;
 static gfx_color_t tile_buffer_a[MR_SCREEN_W * MR_TILE_H];
 #if MR_LACE_CORE1 ||                                                           \
     !(((MR_STRESS_PICO_FLUSH_MODE == 5) ||                                     \
@@ -1021,6 +1023,7 @@ static void stress_lcdtest_loop(void) {
                           draw_lcdtest_scene, 0, screenshot_wait_for_display,
                           0);
 
+  mr_timestep_init(&stress_step, 60, 5);
   stress_reset_timing();
   for (;;) {
     uint32_t frame_t0;
@@ -1263,7 +1266,16 @@ void mr_pico_stress_demo_main(void) {
    */
   stress_present_this_frame = 1;
   stress_dirty_this_frame = 0;
-  mr_stress_tick(&stress);
+  {
+    int steps = mr_timestep_advance(&stress_step, (unsigned long)stress_time_us());
+    while (steps-- > 0)
+      {
+      int steps = mr_timestep_advance(&stress_step,
+                                      (unsigned long)stress_time_us());
+      while (steps-- > 0)
+        mr_stress_tick(&stress);
+    }
+  }
   gfx_render_tiled_pipelined(&renderer, tile_buffer_b, draw_stress_scene,
                              &stress, GFX_RGB565_BLACK, 0u);
   stress_printf("render-only proof frame shown; switching to null LCD flush, "
@@ -1300,7 +1312,16 @@ void mr_pico_stress_demo_main(void) {
 #if MR_STRESS_PICO_FLUSH_MODE == 5
     stress_dirtyrect_src = 0;
 #endif
-    mr_stress_tick(&stress);
+    {
+    int steps = mr_timestep_advance(&stress_step, (unsigned long)stress_time_us());
+    while (steps-- > 0)
+      {
+      int steps = mr_timestep_advance(&stress_step,
+                                      (unsigned long)stress_time_us());
+      while (steps-- > 0)
+        mr_stress_tick(&stress);
+    }
+  }
 #if MR_STRESS_PICO_FLUSH_MODE == 7
     /* Deliberately unoptimized reference path: render, synchronously flush,
        then loop. No DMA/raster overlap. */

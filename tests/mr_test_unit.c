@@ -13,6 +13,7 @@
  */
 #include "mr_test_support.h"
 #include "gfx_rgb444.h"
+#include "mr_timestep.h"
 #include "gfx_engine.h"
 #include "mr_strbuf.h"
 
@@ -628,6 +629,89 @@ static void test_rgb444_pack(void) {
 #endif
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Fixed-timestep accumulator                                          */
+/* ------------------------------------------------------------------ */
+
+static void test_timestep(void) {
+  mr_timestep_t ts;
+  int n;
+  int i;
+  int total;
+
+  mr_timestep_init(&ts, 60, 5);
+  MRT_CHECK_EQ_INT((int)ts.step_us, 16666, "60 Hz step in microseconds");
+
+  /* First call has no previous timestamp and must not invent elapsed time.
+     Treating a boot-time counter as game time would fast-forward the whole
+     simulation on the first frame. */
+  MRT_CHECK_EQ_INT(mr_timestep_advance(&ts, 1000000ul), 0, "first call runs nothing");
+
+  /* Exactly one step of elapsed time yields exactly one step. */
+  MRT_CHECK_EQ_INT(mr_timestep_advance(&ts, 1000000ul + 16666ul), 1, "one step");
+
+  /* A frame faster than the step runs nothing, and the remainder is carried
+     rather than dropped: four quarter-steps must add up to one step. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  total = 0;
+  for (i = 1; i <= 4; ++i)
+    total += mr_timestep_advance(&ts, (unsigned long)i * 4167ul);
+  MRT_CHECK_EQ_INT(total, 1, "quarter steps accumulate to one");
+
+  /* Thousands of FPS: most frames run zero steps and the rate still averages
+     out. 2000 frames at 500us each is one second, so about 60 steps. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  total = 0;
+  for (i = 1; i <= 2000; ++i)
+    total += mr_timestep_advance(&ts, (unsigned long)i * 500ul);
+  MRT_CHECK(total >= 59 && total <= 61, "2000 fast frames give ~60 steps: %d", total);
+
+  /* Slow frames run several steps each, and the same wall-clock second still
+     produces about 60 steps. This is the property that makes all three
+     platforms agree. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  total = 0;
+  for (i = 1; i <= 15; ++i)
+    total += mr_timestep_advance(&ts, (unsigned long)i * 66667ul);
+  MRT_CHECK(total >= 59 && total <= 61, "15 slow frames give ~60 steps: %d", total);
+
+  /* A long stall must not bank time. Without the clamp the accumulator pays a
+     stall back over many frames and the game runs fast afterwards. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  n = mr_timestep_advance(&ts, 10000000ul); /* ten second freeze */
+  MRT_CHECK_EQ_INT(n, 5, "stall is capped at max_steps");
+  n = mr_timestep_advance(&ts, 10000000ul + 16666ul);
+  MRT_CHECK_EQ_INT(n, 1, "no catch-up burst after the stall");
+
+  /* Counter wrap. DOS wraps about every 71 minutes; unsigned subtraction has
+     to keep working across it or the game freezes for the length of the gap. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0xFFFFFFFFul - 10000ul);
+  n = mr_timestep_advance(&ts, 0xFFFFFFFFul - 10000ul + 16666ul);
+  MRT_CHECK_EQ_INT(n, 1, "advance survives a counter wrap");
+
+  /* Degenerate arguments must clamp rather than divide by zero or loop
+     forever. */
+  mr_timestep_init(&ts, 0, 0);
+  MRT_CHECK(ts.step_us > 0ul, "zero hz clamps to a nonzero step");
+  MRT_CHECK_EQ_INT(ts.max_steps, 1, "zero cap clamps to one");
+  mr_timestep_init(&ts, -5, -5);
+  MRT_CHECK(ts.step_us > 0ul, "negative hz clamps");
+  MRT_CHECK_EQ_INT(mr_timestep_advance(0, 1000ul), 0, "null accumulator");
+
+  /* Reset forgets the previous timestamp, so the next call establishes a new
+     baseline instead of seeing a huge jump. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  mr_timestep_reset(&ts);
+  MRT_CHECK_EQ_INT(mr_timestep_advance(&ts, 5000000ul), 0, "reset drops the gap");
+}
+
 int main(void) {
   static const test_entry_t tests[] = {
       {"blit alignment", test_blit_alignment},
@@ -644,6 +728,7 @@ int main(void) {
       {"line endpoints", test_line_endpoints},
       {"shared string builder", test_strbuf},
       {"rgb444 packing", test_rgb444_pack},
+      {"fixed timestep", test_timestep},
   };
   size_t i;
   int before;

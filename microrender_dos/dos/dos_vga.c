@@ -131,6 +131,64 @@ void dos_vga_wait_vblank(void) {
 }
 
 unsigned long dos_vga_ticks(void) { return *dos_vga_bios_ticks; }
+
+/*
+ * Microsecond timer.
+ *
+ * dos_vga_ticks() reads the BIOS counter at 0040:006C, which advances 18.2
+ * times per second: about 55 ms of resolution. That is fine for reporting an
+ * average frame rate over a second, and useless for anything per-frame. At the
+ * 140 FPS this frontend reaches under DOSBox a frame is about 7 ms, so the
+ * counter does not move for eight frames and then jumps a whole tick.
+ *
+ * PIT channel 0 is what drives that counter. It counts down from 65536 at
+ * 1,193,182 Hz and reloads on every BIOS tick, so latching its current count
+ * gives the fraction of a tick elapsed, at roughly 838 ns per step.
+ *
+ * Latching (command 0x00 to port 0x43) only samples the counter into a holding
+ * register; it does not reprogram the timer or disturb the BIOS interrupt. DOS
+ * timekeeping is unaffected.
+ *
+ * The BIOS tick and the PIT counter must be read carefully: if the tick
+ * increments between the two reads, combining them yields a time that jumps
+ * backwards by up to 55 ms. Reading the tick, then the counter, then the tick
+ * again, and retrying when it changed, closes that window.
+ */
+unsigned long dos_vga_micros(void) {
+  unsigned long tick_before;
+  unsigned long tick_after;
+  unsigned int count;
+  unsigned int lo;
+  unsigned int hi;
+  int attempts;
+
+  for (attempts = 0; attempts < 4; ++attempts) {
+    tick_before = *dos_vga_bios_ticks;
+
+    _disable();
+    outp(0x43, 0x00); /* latch channel 0 */
+    lo = (unsigned int)(unsigned char)inp(0x40);
+    hi = (unsigned int)(unsigned char)inp(0x40);
+    _enable();
+
+    tick_after = *dos_vga_bios_ticks;
+    if (tick_before != tick_after)
+      continue; /* rolled over mid-read; sample again */
+
+    count = (unsigned int)((hi << 8) | lo);
+
+    /* The counter runs downwards, so elapsed-within-tick is the complement.
+       65536 - count, in units of 1/1193182 s, is (65536 - count) * 1000000
+       / 1193182 microseconds. Scaling by 8381/10000 approximates that ratio
+       (0.83810) without needing 32-bit division on a 16-bit target. */
+    return tick_before * 54925ul +
+           (((65536ul - (unsigned long)count) * 8381ul) / 10000ul);
+  }
+
+  /* Four rollovers in a row should not happen; fall back to tick resolution
+     rather than spinning. */
+  return *dos_vga_bios_ticks * 54925ul;
+}
 void dos_vga_set_flush_enabled(int enabled) { dos_vga_flush_on = enabled; }
 int dos_vga_flush_enabled(void) { return dos_vga_flush_on; }
 
