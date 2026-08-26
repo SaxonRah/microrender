@@ -13,7 +13,8 @@ Usage
     python scripts/mr_capture.py raylib                 run the Raylib matrix
     python scripts/mr_capture.py pico COM5              capture from a Pico
     python scripts/mr_capture.py pico COM5 stress-raw   expect a different preset
-    python scripts/mr_capture.py raylib pico COM5       both
+    python scripts/mr_capture.py dos                    run the DOS build
+    python scripts/mr_capture.py raylib dos pico COM5   all three
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
 necessarily the firmware you last built. The reported configuration is checked
@@ -217,6 +218,76 @@ def check_pico_config(fields, preset):
     return problems
 
 
+def capture_dos(rows, frames=900):
+    """Run the DOS build under DOSBox and collect its capture.
+
+    The frontend writes the same MRSHOT1 file the other platforms do, into the
+    mounted working directory, so nothing here needs to know it came from DOS.
+    """
+    exe = None
+    for cand in ("mrender.exe", "MRENDER.EXE"):
+        for sub in ("microrender_dos", "microrender_dos/bin",
+                    "microrender_dos/build"):
+            p = os.path.join(ROOT, sub, cand)
+            if os.path.exists(p):
+                exe = p
+                break
+        if exe:
+            break
+    if not exe:
+        print("dos: no mrender.exe found; run  .\\mr.bat build dos mode=both")
+        return
+
+    dosbox = None
+    for cand in ("dosbox-x", "dosbox"):
+        for probe in (cand, cand + ".exe"):
+            try:
+                subprocess.run([probe, "-version"], capture_output=True,
+                               timeout=10)
+                dosbox = probe
+                break
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+        if dosbox:
+            break
+    if not dosbox:
+        print("dos: DOSBox not on PATH; run it yourself with:")
+        print("       mrender /auto /frames %d /shot dos.shot /report dos.txt"
+              % frames)
+        return
+
+    workdir = os.path.dirname(exe)
+    shot = os.path.join(workdir, "dos.shot")
+    rep = os.path.join(workdir, "dos.txt")
+    for stale in (shot, rep):
+        if os.path.exists(stale):
+            os.remove(stale)
+
+    cmd = [dosbox, "-noconsole", "-exit", "-c", "MOUNT C \"%s\"" % workdir,
+           "-c", "C:", "-c",
+           "%s /auto /frames %d /shot dos.shot /report dos.txt"
+           % (os.path.basename(exe).split(".")[0], frames),
+           "-c", "EXIT"]
+    print("dos: running under %s" % dosbox)
+    try:
+        subprocess.run(cmd, cwd=workdir, timeout=300,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        print("        timed out")
+        return
+
+    if not os.path.exists(shot):
+        print("        no capture produced; check the DOSBox window manually")
+        return
+
+    dest = os.path.join(OUT, "dos-game.shot")
+    os.replace(shot, dest)
+    fields = read_report(rep)
+    if os.path.exists(rep):
+        os.remove(rep)
+    rows.append(finish("dos", "game", dest, fields))
+
+
 def capture_pico(rows, port, preset="stress-lace", baud=115200):
     try:
         import serial
@@ -357,6 +428,8 @@ def main(argv):
         what = argv[i]
         if what == "raylib":
             capture_raylib(rows)
+        elif what == "dos":
+            capture_dos(rows)
         elif what == "pico":
             if i + 1 >= len(argv):
                 print("pico needs a port, e.g.  pico COM5")
@@ -364,7 +437,7 @@ def main(argv):
             i += 1
             port = argv[i]
             preset = "stress-lace"
-            if i + 1 < len(argv) and argv[i + 1] not in ("raylib", "pico"):
+            if i + 1 < len(argv) and argv[i + 1] not in ("raylib", "pico", "dos"):
                 i += 1
                 preset = argv[i]
             capture_pico(rows, port, preset)

@@ -168,7 +168,8 @@ not installed on the runners.
 python scripts\mr_capture.py raylib
 python scripts\mr_capture.py pico COM5
 python scripts\mr_capture.py pico COM5 stress-raw
-python scripts\mr_capture.py raylib pico COM5
+python scripts\mr_capture.py dos
+python scripts\mr_capture.py raylib dos pico COM5
 ```
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
@@ -202,9 +203,22 @@ MRSHOT1 <width> <height> <bytes>
 <width*height little-endian RGB565 pixels>
 ```
 
-The Pico already spoke this over USB serial; `--shot PATH` and `--report PATH`
-were added to the Raylib frontend to match. DOS has no capture yet -- it needs
-real-mode file output in the frontend, which is the remaining piece.
+The Pico already spoke this over USB serial. `--shot PATH` / `--report PATH`
+were added to the Raylib frontend and `/shot FILE` / `/report FILE` to the DOS
+frontend, so all three now emit the same thing.
+
+DOS streams the frame a tile at a time through the renderer's own flush hook
+rather than from a full-frame buffer: the tiled present mode never holds a
+complete frame, and 150 KiB is more than a real-mode program should allocate
+just to save a picture. Swapping the flush callback re-renders the scene into
+the existing tile buffer and writes each strip as it is produced.
+
+DOS capture needs DOSBox on PATH. Without it the script prints the command to
+run by hand:
+
+```text
+mrender /auto /frames 900 /shot dos.shot /report dos.txt
+```
 
 Only the standard library is needed for Raylib capture, including PNG encoding.
 Pico capture needs `pyserial`.

@@ -69,6 +69,8 @@ typedef struct dos_options {
   int had_unknown_option;
   int show_help;
   int vsync;
+  const char *shot_path;
+  const char *report_path;
 } dos_options_t;
 
 static mr_timestep_t dos_step;
@@ -80,6 +82,118 @@ static gfx_renderer_t dos_renderer;
 #if MR_DOS_PRESENT_MODE == 0
 static gfx_color_t __huge *dos_raw_frame;
 #endif
+
+/* Screenshot capture.
+ *
+ * Deliberately matches the Pico's MRSHOT1 serial format, so one parser reads
+ * captures from every platform and a DOS file is byte-comparable with one
+ * pulled off hardware:
+ *
+ *     MRSHOT1 <width> <height> <bytes>\n
+ *     <width*height little-endian RGB565 pixels>
+ *
+ * The frame is streamed a tile at a time through the renderer's own flush
+ * hook rather than from a full-frame buffer. The tiled present mode never
+ * holds a complete frame, and a 320x240 RGB565 frame is 150 KiB -- more than
+ * a real-mode program should be allocating just to save a picture. Swapping
+ * the flush callback re-renders the scene into the existing tile buffer and
+ * writes each strip out as it is produced.
+ *
+ * Rows arrive in order and each is a contiguous run of w pixels, so no
+ * seeking is needed; x is always 0 and w always the full width for this
+ * renderer's tiling.
+ */
+static FILE *dos_shot_file = 0;
+static int dos_shot_failed = 0;
+
+static void dos_shot_flush(gfx_renderer_t GFX_PTR *r, int x, int y, int w,
+                           int h, const gfx_color_t GFX_PTR *pixels,
+                           void GFX_PTR *user) {
+  int row;
+
+  (void)r;
+  (void)x;
+  (void)y;
+  (void)user;
+
+  if (!dos_shot_file || dos_shot_failed || !pixels || w <= 0 || h <= 0)
+    return;
+
+  for (row = 0; row < h; ++row) {
+    size_t got = fwrite(pixels + (long)row * (long)w, sizeof(gfx_color_t),
+                        (size_t)w, dos_shot_file);
+    if (got != (size_t)w) {
+      dos_shot_failed = 1;
+      return;
+    }
+  }
+}
+
+static int dos_write_shot(const char *path, gfx_renderer_t GFX_PTR *r,
+                          void (*draw_scene)(gfx_renderer_t GFX_PTR *r,
+                                             void GFX_PTR *scene_user),
+                          void GFX_PTR *scene_user) {
+  gfx_flush_fn saved_flush;
+  void GFX_PTR *saved_user;
+  int ok;
+
+  if (!path || !r)
+    return 0;
+
+  dos_shot_file = fopen(path, "wb");
+  if (!dos_shot_file)
+    return 0;
+  dos_shot_failed = 0;
+
+  fprintf(dos_shot_file, "MRSHOT1 %d %d %lu\n", DOS_SCREEN_W, DOS_SCREEN_H,
+          (unsigned long)DOS_FRAME_PIXELS * (unsigned long)sizeof(gfx_color_t));
+
+  saved_flush = r->flush;
+  saved_user = r->user;
+  r->flush = dos_shot_flush;
+  r->user = 0;
+
+  gfx_render_tiled(r, draw_scene, scene_user, GFX_RGB565_BLACK);
+
+  r->flush = saved_flush;
+  r->user = saved_user;
+
+  ok = !dos_shot_failed;
+  if (fclose(dos_shot_file) != 0)
+    ok = 0;
+  dos_shot_file = 0;
+  return ok;
+}
+
+/* Machine-readable run summary, one key=value per line, matching what the
+   Raylib frontend writes so the capture harness needs no special case. */
+static int dos_write_report(const char *path, const dos_options_t *opt,
+                            unsigned long frames, unsigned long sim_ticks,
+                            unsigned long elapsed_us) {
+  FILE *f;
+  double secs;
+
+  if (!path)
+    return 0;
+  f = fopen(path, "wb");
+  if (!f)
+    return 0;
+
+  secs = (double)elapsed_us / 1000000.0;
+  fprintf(f, "platform=dos\n");
+  fprintf(f, "demo=game\n");
+  fprintf(f, "width=%d\nheight=%d\n", DOS_SCREEN_W, DOS_SCREEN_H);
+  fprintf(f, "tile_h=%d\n", DOS_TILE_H);
+  fprintf(f, "present_mode=%d\n", MR_DOS_PRESENT_MODE);
+  fprintf(f, "vsync=%d\n", opt ? opt->vsync : 0);
+  fprintf(f, "frames=%lu\n", frames);
+  fprintf(f, "elapsed_s=%.4f\n", secs);
+  fprintf(f, "fps_avg=%.2f\n", secs > 0.0 ? (double)frames / secs : 0.0);
+  fprintf(f, "sim_ticks=%lu\n", sim_ticks);
+  fprintf(f, "sim_hz=%.2f\n", secs > 0.0 ? (double)sim_ticks / secs : 0.0);
+  fclose(f);
+  return 1;
+}
 
 static int arg_eq(const char *a, const char *b) {
   while (*a && *b) {
@@ -332,6 +446,8 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
   int i;
 
   opt->autoplay = 0;
+  opt->shot_path = 0;
+  opt->report_path = 0;
   opt->frames_limit = 0;
   opt->wait_key_on_exit = 0;
   opt->show_help = 0;
@@ -345,6 +461,14 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
     } else if (arg_eq(argv[i], "/auto") || arg_eq(argv[i], "-auto") ||
                arg_eq(argv[i], "/autorun") || arg_eq(argv[i], "-autorun")) {
       opt->autoplay = 1;
+    } else if ((arg_eq(argv[i], "/shot") || arg_eq(argv[i], "-shot")) &&
+               i + 1 < argc) {
+      ++i;
+      opt->shot_path = argv[i];
+    } else if ((arg_eq(argv[i], "/report") || arg_eq(argv[i], "-report")) &&
+               i + 1 < argc) {
+      ++i;
+      opt->report_path = argv[i];
     } else if (arg_eq(argv[i], "/wait") || arg_eq(argv[i], "-wait")) {
       opt->wait_key_on_exit = 1;
     } else if (arg_eq(argv[i], "/vsync") || arg_eq(argv[i], "-vsync")) {
@@ -376,6 +500,7 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
 static int dos_run_shared_game(const dos_options_t *opt) {
   mr_demo_input_t input;
   unsigned long frame;
+  unsigned long start_us;
   unsigned long start_tick;
   unsigned long fps_tick;
   unsigned long fps_frame;
@@ -401,6 +526,7 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   frame = 0UL;
   dos_sim_ticks = 0UL;
   mr_timestep_init(&dos_step, 60, 5);
+  start_us = dos_vga_micros();
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
   fps_frame = 0UL;
@@ -464,6 +590,19 @@ static int dos_run_shared_game(const dos_options_t *opt) {
 
     if (opt->vsync)
       dos_vga_wait_vblank();
+  }
+
+  /* Capture after the loop, while the renderer and scene are still valid but
+     nothing further will disturb them. The screenshot re-renders the current
+     state into the tile buffer, so it reflects the last simulated frame
+     regardless of which present mode was in use. */
+  if (opt->shot_path)
+    (void)dos_write_shot(opt->shot_path, &dos_renderer, dos_draw_game_scene,
+                         &dos_game);
+  if (opt->report_path) {
+    unsigned long end_us = dos_vga_micros();
+    (void)dos_write_report(opt->report_path, opt, frame, dos_sim_ticks,
+                           end_us - start_us);
   }
 
   return 0;
