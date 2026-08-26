@@ -47,6 +47,16 @@ int mr_timestep_advance(mr_timestep_t *ts, unsigned long now_us) {
   if (!ts)
     return 0;
 
+  /* An accumulator that was never initialised is all zeroes, and zeroes are a
+     silent trap: step_us of 0 and max_steps of 0 make this return 0 forever,
+     so the renderer keeps drawing at full speed while the simulation never
+     advances. On hardware that presents as a frozen scene at a healthy frame
+     rate, which reads as a hang in the renderer rather than a missing call.
+     Defaulting is better than sitting still: a wrong-but-moving rate is
+     obvious, an unmoving one is not. */
+  if (ts->step_us == 0ul || ts->max_steps <= 0)
+    mr_timestep_init(ts, 60, 5);
+
   /* The first call has no previous timestamp to subtract, so it establishes
      one and runs nothing. Treating an unknown delta as zero is right: the
      alternative is interpreting a boot-time counter as elapsed game time. */

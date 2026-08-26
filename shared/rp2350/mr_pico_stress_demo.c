@@ -1256,6 +1256,11 @@ void mr_pico_stress_demo_main(void) {
   multicore_launch_core1(lace_core1_main);
 #endif
 
+  /* Must be initialised on this path too, not only in the lcdtest loop. An
+     unset accumulator has step_us = 0 and max_steps = 0, so advance() returns
+     zero forever: the renderer keeps drawing at full speed while the scene
+     never changes. That looks exactly like a hang. */
+  mr_timestep_init(&stress_step, 60, 5);
   stress_reset_timing();
 
 #if MR_STRESS_PICO_FLUSH_MODE == 1
@@ -1267,14 +1272,10 @@ void mr_pico_stress_demo_main(void) {
   stress_present_this_frame = 1;
   stress_dirty_this_frame = 0;
   {
-    int steps = mr_timestep_advance(&stress_step, (unsigned long)stress_time_us());
+    int steps = mr_timestep_advance(&stress_step,
+                                    (unsigned long)stress_time_us());
     while (steps-- > 0)
-      {
-      int steps = mr_timestep_advance(&stress_step,
-                                      (unsigned long)stress_time_us());
-      while (steps-- > 0)
-        mr_stress_tick(&stress);
-    }
+      mr_stress_tick(&stress);
   }
   gfx_render_tiled_pipelined(&renderer, tile_buffer_b, draw_stress_scene,
                              &stress, GFX_RGB565_BLACK, 0u);
@@ -1313,15 +1314,11 @@ void mr_pico_stress_demo_main(void) {
     stress_dirtyrect_src = 0;
 #endif
     {
-    int steps = mr_timestep_advance(&stress_step, (unsigned long)stress_time_us());
-    while (steps-- > 0)
-      {
       int steps = mr_timestep_advance(&stress_step,
                                       (unsigned long)stress_time_us());
       while (steps-- > 0)
         mr_stress_tick(&stress);
     }
-  }
 #if MR_STRESS_PICO_FLUSH_MODE == 7
     /* Deliberately unoptimized reference path: render, synchronously flush,
        then loop. No DMA/raster overlap. */

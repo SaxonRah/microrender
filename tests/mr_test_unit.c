@@ -720,6 +720,19 @@ static void test_timestep(void) {
   MRT_CHECK(ts.step_us > 0ul, "negative hz clamps");
   MRT_CHECK_EQ_INT(mr_timestep_advance(0, 1000ul), 0, "null accumulator");
 
+  /* A zeroed accumulator -- one that was never initialised, which is what a
+     static declaration gives you -- must not silently return 0 forever. That
+     failure mode is a scene frozen at a full frame rate, which looks like a
+     renderer hang rather than a missing init call. */
+  {
+    mr_timestep_t zeroed;
+    memset(&zeroed, 0, sizeof(zeroed));
+    MRT_CHECK_EQ_INT(mr_timestep_advance(&zeroed, 0ul), 0,
+                     "zeroed accumulator establishes a baseline");
+    MRT_CHECK_EQ_INT(mr_timestep_advance(&zeroed, 16666ul), 1,
+                     "zeroed accumulator still advances");
+  }
+
   /* Reset forgets the previous timestamp, so the next call establishes a new
      baseline instead of seeing a huge jump. */
   mr_timestep_init(&ts, 60, 5);
