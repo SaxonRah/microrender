@@ -219,7 +219,7 @@ void mr_pico_ili9341_flush_bytes(int x, int y, int w, int h,
                         bytes, (uint32_t)nbytes, true);
   dma_channel_wait_for_finish_blocking(ctx->dma_chan);
   lcd_wait_spi_idle(ctx);
-  lcd_cs_high(ctx);
+  lcd_deselect(ctx);
 }
 
 void mr_pico_ili9341_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,
