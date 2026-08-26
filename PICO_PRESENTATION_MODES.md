@@ -162,8 +162,48 @@ the crystal never fully switches. Sweep `0x19` (76 Hz), `0x18` (79 Hz),
 raised, presenting above ~70 FPS produces frames the panel overwrites before
 scanning out, which is the real reason there is nothing left to win here.
 
-**Recommended configuration:** `stress-lace` with `MR_PICO_PRESENT_CORE1=ON`.
-110.8 FPS at stock clocks, stock pixel format, and a clean image.
+**Recommended configuration:** the `stress-lace` preset, which now enables
+`MR_PICO_PRESENT_CORE1` by default: 110.8 FPS at stock clocks, stock pixel
+format, and a clean image. It costs a second 150 KiB frame buffer.
+
+### Panel refresh sweep
+
+The board presents faster than the panel scans. At the reset default the panel
+runs at about 70 Hz, so roughly 40 of every 110 frames are overwritten in GRAM
+before they are ever displayed. Raising `FRMCTR1` is the only remaining change
+that alters what is actually visible.
+
+It cannot simply be set to the datasheet maximum. `RTNA=0x10` (119 Hz) washed
+out to near-white with the image faint behind it: fewer clocks per line means
+less time to charge each row, so the crystal never fully switches. The right
+value is per-module and has to be found by sweeping.
+
+Build each and look at the display -- the serial FPS will not change, since
+this affects the panel, not the presentation rate:
+
+```
+scripts\mr_frmctr_sweep.bat
+```
+
+Or by hand:
+
+```
+.\mr.bat build pico stress-lace MR_ILI9341_FRMCTR1_RTNA=0x19 serial=ON
+```
+
+| RTNA | nominal | verdict |
+| --- | --- | --- |
+| `0x1B` | 70 Hz | reset default, known good |
+| `0x19` | 76 Hz | |
+| `0x18` | 79 Hz | |
+| `0x16` | 86 Hz | |
+| `0x13` | 100 Hz | |
+| `0x10` | 119 Hz | washed out on a Pico Plus 2 + generic ILI9341 |
+
+Take the fastest value that still shows solid blacks and full-brightness
+whites, then step back one for margin. Contrast degrades gradually rather than
+failing outright, so compare against the `0x1B` build rather than judging any
+one build on its own.
 
 ### Build directories are per preset, not per flag
 
