@@ -120,6 +120,48 @@ Two consequences worth keeping in mind before chasing a bigger number:
   presentations are overwritten before they are scanned out. The ILI9341 TE pin
   is likewise unused, so nothing is synchronized to the panel scan.
 
+### Measured on a Pimoroni Pico Plus 2 (RP2350)
+
+`lace` + `MR_PICO_PRESENT_CORE1=ON`, 1024 sprites, 75 MHz SPI, 300 MHz system:
+
+```
+fps=110.0  frameUs=9072  cpuUs=5181  flushUs=3892  sentKB per frame=75
+```
+
+`flushUs` is core 0's *wait*, not the transfer duration: the transfer spans the
+whole frame, overlapping the 5.2 ms of rasterization and blocking core 0 for the
+remaining 3.9 ms. So:
+
+- rasterization is about 5.2 ms, a ~192 FPS ceiling on its own
+- transfer is about 9.07 ms, of which 8.19 ms is pure wire time at 75 MHz
+- the remaining ~0.88 ms is per-block protocol: 30 row groups at roughly 29 us
+  each for the window write, the 8/16-bit format switches, and the DMA drain
+
+That is 88% bus efficiency. Fewer, larger row groups recover most of the rest:
+`MR_STRESS_LACE_BLOCK_H=8` should reach about 116 FPS for a one-line change.
+
+### Panel refresh is the real ceiling
+
+Measured on the same panel: `MR_ILI9341_FRMCTR1_RTNA=0x10` (the datasheet's
+119 Hz setting) produced a washed-out white screen with the render barely
+visible behind it. That is what an under-driven panel looks like -- fewer clocks
+per line means less time to charge each row, so the crystal never fully
+switches. The datasheet maximum is not what a given module will actually hold.
+
+Sweep it rather than jumping to the fast end, and stop at the last value with
+acceptable contrast:
+
+| RTNA | nominal | |
+| --- | --- | --- |
+| `0x1B` | 70 Hz | reset default, known good |
+| `0x19` | 76 Hz | try first |
+| `0x18` | 79 Hz | |
+| `0x16` | 86 Hz | |
+| `0x10` | 119 Hz | washed out on a Pico Plus 2 + generic ILI9341 |
+
+Until this is raised, presenting above ~70 FPS produces frames the panel
+overwrites before scanning out.
+
 ### Split-PLL SPI clock
 
 The RP2350 SPI baud generator divides `clk_peri` by `prescale * postdiv`. With

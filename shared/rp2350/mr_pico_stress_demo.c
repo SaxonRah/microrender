@@ -9,7 +9,9 @@
 #endif
 #include "mr_strbuf.h"
 #include "gfx.h"
+#include "gfx_rgb444.h"
 #include "hardware/clocks.h"
+#include "hardware/pll.h"
 #include "hardware/regs/clocks.h"
 #include "hardware/timer.h"
 #include "mr_pico_ili9341.h"
@@ -893,6 +895,20 @@ static void stress_render_fullframe_dirtyrect(gfx_color_t *buffer) {
 #endif
 }
 
+#ifndef MR_STRESS_LACE_PHASES
+#define MR_STRESS_LACE_PHASES 2
+#endif
+
+#if (MR_STRESS_PICO_FLUSH_MODE == 6) && MR_ILI9341_COLMOD_12BIT
+/* Worst-case block is MR_STRESS_PICO_LACE_BLOCK_H rows, clamped to the view.
+   Three bytes per two pixels, rounded up. */
+#define MR_STRESS_PACK_ROWS                                                    \
+  ((MR_STRESS_PICO_LACE_BLOCK_H > MR_VIEW_H) ? MR_VIEW_H                       \
+                                             : MR_STRESS_PICO_LACE_BLOCK_H)
+static uint8_t stress_pack_buf[((MR_SCREEN_W * MR_STRESS_PACK_ROWS) * 3 + 1) /
+                               2];
+#endif
+
 #if MR_STRESS_PICO_FLUSH_MODE == 6
 /* Send one lace phase. Callable from either core: the renderer argument is
    unused by the ILI9341 flush, so this touches only the panel and the buffer
@@ -900,20 +916,43 @@ static void stress_render_fullframe_dirtyrect(gfx_color_t *buffer) {
 static void stress_lace_send_phase(const gfx_color_t *buffer, int phase) {
   int block_h = MR_STRESS_PICO_LACE_BLOCK_H;
   int y;
+  int stride;
 
   if (block_h < 1)
     block_h = 1;
   if (block_h > MR_VIEW_H)
     block_h = MR_VIEW_H;
 
-  for (y = phase * block_h; y < MR_VIEW_H; y += block_h * 2) {
+  /* One phase means every row every frame: no interlace, no shimmer, and one
+     window setup instead of thirty. Worth it once the payload is small enough
+     to fit a full frame in the time budget, which is what 12 bpp buys. */
+  stride = (MR_STRESS_LACE_PHASES <= 1) ? block_h : block_h * 2;
+  if (MR_STRESS_LACE_PHASES <= 1)
+    phase = 0;
+
+  for (y = phase * block_h; y < MR_VIEW_H; y += stride) {
     int h = block_h;
     if (y + h > MR_VIEW_H)
       h = MR_VIEW_H - y;
     if (h <= 0)
       continue;
+#if MR_ILI9341_COLMOD_12BIT
+    {
+      /* Pack a block at a time into a small static buffer rather than keeping
+         a second full-size packed frame. A block is at most
+         MR_SCREEN_W * block_h pixels, and packing it costs roughly 6% of the
+         time its own transfer takes, so it hides inside the pipeline. */
+      size_t nbytes =
+          gfx_pack_rgb444(stress_pack_buf, buffer + y * MR_SCREEN_W,
+                          MR_SCREEN_W * h);
+      if (nbytes)
+        mr_pico_ili9341_flush_bytes(0, y, MR_SCREEN_W, h, stress_pack_buf,
+                                    nbytes, &lcd);
+    }
+#else
     mr_pico_ili9341_flush(0, 0, y, MR_SCREEN_W, h, buffer + y * MR_SCREEN_W,
                           &lcd);
+#endif
   }
 }
 #endif
@@ -968,8 +1007,20 @@ static void stress_render_fullframe_lace_core1(void) {
   lace_present_sync();
   stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
 
-  /* Half the rows, two bytes each. */
-  stress_flush_bytes += (unsigned long)MR_SCREEN_W * (unsigned long)MR_VIEW_H;
+  /* sentKB must reflect what actually went down the wire, or the throughput
+     line silently lies once either the phase count or the pixel format
+     changes. */
+  {
+    unsigned long rows =
+        (MR_STRESS_LACE_PHASES <= 1) ? (unsigned long)MR_VIEW_H
+                                     : ((unsigned long)MR_VIEW_H / 2ul);
+    unsigned long px = (unsigned long)MR_SCREEN_W * rows;
+#if MR_ILI9341_COLMOD_12BIT
+    stress_flush_bytes += (px * 3ul + 1ul) / 2ul;
+#else
+    stress_flush_bytes += px * 2ul;
+#endif
+  }
   lace_present_async(buffer, (int)(frame_counter & 1ul));
 }
 #endif
@@ -1090,23 +1141,52 @@ static int stress_configure_split_pll_clock(void) {
   if (pll_hz == 0u || sys_hz == 0u)
     return 0;
 
-  if (!set_sys_clock_khz((uint32_t)MR_PICO_PERI_PLL_KHZ,
-                         MR_PICO_CLOCK_REQUIRED ? true : false)) {
-    if (MR_PICO_CLOCK_REQUIRED)
+  {
+    uint vco_freq;
+    uint post_div1;
+    uint post_div2;
+    uint32_t ref_hz;
+
+    if (pll_hz < sys_hz)
       return 0;
+
+    /* Find PLL settings for the *peripheral* rate without applying them.
+       set_sys_clock_khz() would apply them to clk_sys, which is the bug this
+       replaces: asking for a 340 MHz peripheral PLL used to run the whole
+       chip -- CPU and XIP flash reads -- at 340 MHz before dividing back
+       down, while executing the very code doing the dividing. On a Pico
+       Plus 2 that reliably white-screens. */
+    if (!check_sys_clock_khz((uint32_t)MR_PICO_PERI_PLL_KHZ, &vco_freq,
+                             &post_div1, &post_div2))
+      return 0;
+
+    ref_hz = clock_get_hz(clk_ref);
+
+    /* Park clk_sys and clk_peri on the reference so pll_sys can be retuned
+       with nothing downstream of it running. clk_ref is slower than the
+       current clk_sys, never faster, so flash stays readable throughout. */
+    clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, ref_hz,
+                    ref_hz);
+    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+                    ref_hz, ref_hz);
+
+    pll_init(pll_sys, 1, vco_freq, post_div1, post_div2);
+
+    /* clk_sys comes back at the requested system rate, divided down from the
+       PLL. It never runs above MR_PICO_SYS_KHZ at any point. */
+    clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
+                    CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, pll_hz,
+                    sys_hz);
+
+    /* clk_peri has no divider, so it takes the full PLL rate. That is the
+       whole point: it is what lets the SPI divider reach rates clk_sys
+       cannot produce. */
+    clock_configure(clk_peri, 0,
+                    CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, pll_hz,
+                    pll_hz);
+    sleep_ms(2);
+    return 1;
   }
-  sleep_ms(10);
-
-  /* clk_peri has no divider on RP2040-style clocking, so attach it directly
-   * to the system PLL output. clk_sys can then be divided separately. */
-  clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
-                  pll_hz, pll_hz);
-
-  clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
-                  CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, pll_hz,
-                  sys_hz);
-  sleep_ms(2);
-  return 1;
 #else
   return 0;
 #endif

@@ -87,6 +87,8 @@ set(MR_ILI9341_MADCTL 0xE8     CACHE STRING "MADCTL orientation byte")
 # Panel refresh rate (FRMCTR1). Defaults reproduce the ILI9341 reset state,
 # about 70 Hz. Lower RTNA is faster: 0x19=76Hz, 0x16=86Hz, 0x13=100Hz,
 # 0x10=119Hz. Only meaningful if the presentation rate actually exceeds 70 FPS.
+option(MR_ILI9341_COLMOD_12BIT "Drive the panel at 12bpp (RGB444) instead of 16bpp" OFF)
+set(MR_STRESS_LACE_PHASES 2 CACHE STRING "Lace phases; 1 = every row every frame")
 set(MR_ILI9341_FRMCTR1_DIVA 0x00 CACHE STRING "FRMCTR1 fosc division ratio (0-3)")
 set(MR_ILI9341_FRMCTR1_RTNA 0x1B CACHE STRING "FRMCTR1 clocks per line; lower is faster")
 
@@ -335,6 +337,8 @@ target_compile_definitions(microrender PRIVATE
     MR_LCD_PIN_DC=${MR_LCD_PIN_DC}
     MR_LCD_SPI_BAUD=${MR_LCD_SPI_BAUD}
     MR_ILI9341_MADCTL=${MR_ILI9341_MADCTL}
+    MR_ILI9341_COLMOD_12BIT=$<BOOL:${MR_ILI9341_COLMOD_12BIT}>
+    MR_STRESS_LACE_PHASES=${MR_STRESS_LACE_PHASES}
     MR_ILI9341_FRMCTR1_DIVA=${MR_ILI9341_FRMCTR1_DIVA}
     MR_ILI9341_FRMCTR1_RTNA=${MR_ILI9341_FRMCTR1_RTNA}
 
