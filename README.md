@@ -62,6 +62,12 @@ Both `key=value` and quoted `"key=value"` forms are accepted. Build variants are
 cache settings, not source rewrites. See [Building.md](Building.md) and
 [SCRIPTS.md](SCRIPTS.md).
 
+[DECISIONS.md](DECISIONS.md) records the optimizations that were tried on real
+hardware, with the prediction, the measurement, and the mechanism behind each
+outcome. Most of them failed, which is the useful part: the arithmetic was
+right and the model of the hardware underneath it was wrong, in four different
+places.
+
 ## Presentation paths
 
 ### Raw reference path
