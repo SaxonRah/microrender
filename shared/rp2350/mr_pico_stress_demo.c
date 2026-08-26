@@ -1,4 +1,12 @@
 #include "mr_pico_stress_demo.h"
+/* MR_PICO_PRESENT_CORE1 arrives from the build system like every other MR_*
+   option, so it is already visible here. The #ifndef fallback further down
+   only covers builds that never set it, where this evaluates to 0 and the
+   second-core presenter is compiled out entirely. */
+#if MR_PICO_PRESENT_CORE1
+#include "hardware/sync.h"
+#include "pico/multicore.h"
+#endif
 #include "mr_strbuf.h"
 #include "gfx.h"
 #include "hardware/clocks.h"
@@ -180,10 +188,43 @@
 #define MR_VIEW_H 32
 #endif
 
+/*
+ * Optional second-core presenter for lace.
+ *
+ * Lace renders a complete frame and then sends alternating row groups with the
+ * blocking flush, so ~5 ms of rasterization and ~8 ms of SPI transfer run
+ * strictly one after the other. The transfer cannot be handed to DMA alone,
+ * because each row group needs its own CASET/RASET/RAMWR window written in
+ * 8-bit mode, and DMA has no way to wait for the shifter to drain before
+ * toggling D/C.
+ *
+ * Core 1 can do that waiting instead. It owns the panel for a whole frame
+ * while core 0 renders the next one into the other buffer.
+ *
+ * Cost: this reinstates the 150 KiB second buffer that lace currently skips,
+ * for 300 KiB of the RP2350's 520 KiB. Off by default for that reason.
+ */
+#ifndef MR_PICO_PRESENT_CORE1
+#define MR_PICO_PRESENT_CORE1 0
+#endif
+
+#if MR_PICO_PRESENT_CORE1 && (MR_STRESS_PICO_FLUSH_MODE == 6) &&               \
+    (MR_TILE_H >= MR_VIEW_H)
+#define MR_LACE_CORE1 1
+#else
+#define MR_LACE_CORE1 0
+#endif
+
+#if MR_LACE_CORE1
+static void lace_present_sync(void);
+static void lace_core1_main(void);
+#endif
+
 static gfx_color_t tile_buffer_a[MR_SCREEN_W * MR_TILE_H];
-#if !(((MR_STRESS_PICO_FLUSH_MODE == 5) || \
-       (MR_STRESS_PICO_FLUSH_MODE == 6) || \
-       (MR_STRESS_PICO_FLUSH_MODE == 7)) && \
+#if MR_LACE_CORE1 ||                                                           \
+    !(((MR_STRESS_PICO_FLUSH_MODE == 5) ||                                     \
+       (MR_STRESS_PICO_FLUSH_MODE == 6) ||                                     \
+       (MR_STRESS_PICO_FLUSH_MODE == 7)) &&                                    \
       (MR_TILE_H >= MR_VIEW_H))
 static gfx_color_t tile_buffer_b[MR_SCREEN_W * MR_TILE_H];
 #endif
@@ -360,6 +401,11 @@ static void draw_stress_scene(gfx_renderer_t *r, void *user) {
 
 static void screenshot_wait_for_display(void *user) {
   (void)user;
+#if MR_LACE_CORE1
+  /* Core 1 may be mid-frame and owns both the panel and the buffer the
+     screenshot service wants to reuse. Let it finish first. */
+  lace_present_sync();
+#endif
   mr_pico_ili9341_flush_wait(&renderer, &lcd);
 }
 
@@ -847,37 +893,99 @@ static void stress_render_fullframe_dirtyrect(gfx_color_t *buffer) {
 #endif
 }
 
-static void stress_render_fullframe_lace(gfx_color_t *buffer) {
 #if MR_STRESS_PICO_FLUSH_MODE == 6
-  int phase;
+/* Send one lace phase. Callable from either core: the renderer argument is
+   unused by the ILI9341 flush, so this touches only the panel and the buffer
+   handed to it. */
+static void stress_lace_send_phase(const gfx_color_t *buffer, int phase) {
+  int block_h = MR_STRESS_PICO_LACE_BLOCK_H;
   int y;
-  int block_h;
-  uint32_t flush_t0;
 
-  renderer.tile = buffer;
-  gfx_begin_tile(&renderer, 0, MR_VIEW_H);
-  draw_stress_scene(&renderer, &stress);
-
-  block_h = MR_STRESS_PICO_LACE_BLOCK_H;
   if (block_h < 1)
     block_h = 1;
   if (block_h > MR_VIEW_H)
     block_h = MR_VIEW_H;
 
-  phase = (int)(frame_counter & 1ul);
-  flush_t0 = stress_time_us();
   for (y = phase * block_h; y < MR_VIEW_H; y += block_h * 2) {
     int h = block_h;
     if (y + h > MR_VIEW_H)
       h = MR_VIEW_H - y;
     if (h <= 0)
       continue;
-    mr_pico_ili9341_flush(&renderer, 0, y, MR_SCREEN_W, h,
-                          buffer + y * MR_SCREEN_W, &lcd);
-    stress_flush_bytes +=
-        (unsigned long)MR_SCREEN_W * (unsigned long)h * 2ul;
+    mr_pico_ili9341_flush(0, 0, y, MR_SCREEN_W, h, buffer + y * MR_SCREEN_W,
+                          &lcd);
   }
+}
+#endif
+
+#if MR_LACE_CORE1
+static const gfx_color_t *volatile lace_present_buffer;
+static volatile int lace_present_phase;
+static int lace_present_pending;
+
+static void lace_core1_main(void) {
+  for (;;) {
+    (void)multicore_fifo_pop_blocking();
+    __dmb();
+    stress_lace_send_phase((const gfx_color_t *)lace_present_buffer,
+                           lace_present_phase);
+    __dmb();
+    multicore_fifo_push_blocking(1u);
+  }
+}
+
+/* Block until core 1 has finished the frame it was given, if any. */
+static void lace_present_sync(void) {
+  if (!lace_present_pending)
+    return;
+  (void)multicore_fifo_pop_blocking();
+  lace_present_pending = 0;
+}
+
+static void lace_present_async(const gfx_color_t *buffer, int phase) {
+  lace_present_sync();
+  lace_present_buffer = buffer;
+  lace_present_phase = phase;
+  __dmb();
+  multicore_fifo_push_blocking(1u);
+  lace_present_pending = 1;
+}
+
+static void stress_render_fullframe_lace_core1(void) {
+  /* Core 1 is reading the buffer core 0 filled last frame, so core 0 must
+     render into the other one. */
+  gfx_color_t *buffer = (frame_counter & 1ul) ? tile_buffer_b : tile_buffer_a;
+  uint32_t flush_t0;
+
+  renderer.tile = buffer;
+  gfx_begin_tile(&renderer, 0, MR_VIEW_H);
+  draw_stress_scene(&renderer, &stress);
+
+  /* Whatever is left of the previous frame's transfer after this frame's
+     render is the only part that still stalls core 0. When rasterization is
+     the shorter of the two this converges on pure transfer time. */
+  flush_t0 = stress_time_us();
+  lace_present_sync();
   stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
+
+  /* Half the rows, two bytes each. */
+  stress_flush_bytes += (unsigned long)MR_SCREEN_W * (unsigned long)MR_VIEW_H;
+  lace_present_async(buffer, (int)(frame_counter & 1ul));
+}
+#endif
+
+static void stress_render_fullframe_lace(gfx_color_t *buffer) {
+#if MR_STRESS_PICO_FLUSH_MODE == 6
+  uint32_t flush_t0;
+
+  renderer.tile = buffer;
+  gfx_begin_tile(&renderer, 0, MR_VIEW_H);
+  draw_stress_scene(&renderer, &stress);
+
+  flush_t0 = stress_time_us();
+  stress_lace_send_phase(buffer, (int)(frame_counter & 1ul));
+  stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
+  stress_flush_bytes += (unsigned long)MR_SCREEN_W * (unsigned long)MR_VIEW_H;
 #else
   (void)buffer;
 #endif
@@ -1089,6 +1197,13 @@ void mr_pico_stress_demo_main(void) {
 
   stress_present_this_frame = 1;
   stress_dirty_this_frame = 0;
+
+#if MR_LACE_CORE1
+  /* Launch after the panel is initialised and before the first frame, so core
+     1 never touches the LCD while core 0 is still configuring it. */
+  multicore_launch_core1(lace_core1_main);
+#endif
+
   stress_reset_timing();
 
 #if MR_STRESS_PICO_FLUSH_MODE == 1
@@ -1141,6 +1256,8 @@ void mr_pico_stress_demo_main(void) {
     /* Deliberately unoptimized reference path: render, synchronously flush,
        then loop. No DMA/raster overlap. */
     gfx_render_tiled(&renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
+#elif MR_LACE_CORE1
+    stress_render_fullframe_lace_core1();
 #elif (MR_STRESS_PICO_FLUSH_MODE == 6) && (MR_TILE_H >= MR_VIEW_H)
     stress_render_fullframe_lace(tile_buffer_a);
 #elif (MR_STRESS_PICO_FLUSH_MODE == 5) && (MR_TILE_H >= MR_VIEW_H)
