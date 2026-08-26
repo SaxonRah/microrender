@@ -50,7 +50,7 @@ Run commands from the repository root through `mr.bat`:
 .\mr.bat build tests
 .\mr.bat build dos mode=both tile=16 vsync=0
 .\mr.bat build pico game
-.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
+.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=8 hud=2
 .\mr.bat build raylib demo=game mode=tiled tile=16 scale=3 fps=0
 .\mr.bat build all
 ```
@@ -144,7 +144,10 @@ MRSHOT1 <width> <height> <RGB565-byte-count>
 
 The service waits for active LCD DMA, reuses the frontend's existing working
 buffer, and streams a newly rendered complete logical frame tile by tile. It does
-not reserve a second 150 KiB screenshot framebuffer. A lace capture is therefore
+not reserve a second 150 KiB screenshot framebuffer of its own. (With
+`MR_PICO_PRESENT_CORE1=ON` a second frame buffer does exist, for the presenter
+rather than for screenshots; the capture service waits for core 1 to finish
+before reusing it.) A lace capture is therefore
 the clean complete logical frame, not the temporary mixture of row groups visible
 on the physical LCD.
 
@@ -207,7 +210,7 @@ Use the final `vscode` token to configure a selected preset into
 flash/debug settings:
 
 ```powershell
-.\mr.bat build pico stress-lace sprites=1024 lace=4 hud=2 vscode
+.\mr.bat build pico stress-lace sprites=1024 lace=8 hud=2 vscode
 ```
 
 Pico builds are forced through Ninja and the Pico ARM GCC toolchain. Before

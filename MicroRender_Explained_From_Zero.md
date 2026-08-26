@@ -1178,6 +1178,8 @@ The CPU may be able to calculate pixels faster than SPI can send all 153,600 byt
 
 A high renderer-only FPS does not automatically mean the physical display can receive complete new frames at that rate.
 
+There is a third limit past those two. Even when the renderer is fast enough and the link can carry the bytes, the panel scans its own memory at its own fixed rate — around 70 Hz for an ILI9341 at reset defaults. Frames delivered faster than that are overwritten before they are displayed. All three limits are real, and on this hardware the panel is the lowest of them.
+
 The modes separate those costs.
 
 ### `visible`
@@ -1227,6 +1229,22 @@ For example, one frame may update one set of row bands, and the next frame updat
 This reduces the number of bytes sent per displayed update, increasing apparent update frequency. The tradeoff is that some rows temporarily contain pixels from the previous moment, which can create combing or temporal artifacts during motion.
 
 The word “lace” is related to interlaced-style presentation, but this is a custom row-group strategy rather than a claim of standard television interlacing.
+
+#### Presenting from the second core
+
+Sending a row group is mostly waiting. Each group needs its own window command written to the panel, then a DMA transfer, then a wait for the transfer to drain before the next command can be sent. On a single core, that waiting happens instead of rendering: a measured frame spent about 5.2 ms rasterizing and about 9 ms transferring, strictly one after the other.
+
+`MR_PICO_PRESENT_CORE1` moves the sending to the RP2350's second core. Core 1 owns the panel for a whole frame while core 0 renders the next one into a different buffer, so the two overlap and the frame costs roughly the longer of the two rather than their sum. Measured on a Pimoroni Pico Plus 2, this took the 1,024-sprite scene from about 77 FPS to 110.8 FPS with no change to clocks, pixel format, or what is drawn.
+
+The cost is a second 150 KiB frame buffer, because core 0 must not be writing into the buffer core 1 is reading.
+
+Two honest qualifications, because this is exactly the kind of number that invites over-reading:
+
+The stress test advances its simulation one step per frame and takes no delta time, so sprites move about 45% faster at 110 FPS than at 77. Side by side, the faster build looks smoother mostly because the simulation is running quicker. That is a property of the benchmark, not evidence about the renderer.
+
+The panel scans its own memory near 70 Hz regardless. Presenting 110 frames per second into a 70 Hz panel means many of them are overwritten before they are ever displayed. The observed visual difference between 77 and 110 FPS was small — no change in the background, and possibly slightly less jitter.
+
+So 110.8 FPS is a real throughput result and the right thing for a stress test to demonstrate, but it is throughput, not a promise about what a person sees.
 
 ### `lcdtest`
 
@@ -1659,6 +1677,8 @@ It can measure:
 - different rendering tile heights.
 
 These are comparative renderer measurements, not promises of period DOS hardware or physical Pico LCD FPS.
+
+They are also host measurements, which is a sharper caveat than it sounds. A modern compiler will auto-vectorize the simple pixel loops into SIMD instructions that no target this project runs on actually has, so a change can look slower on the host and faster on a Cortex-M33, or the reverse. Treat the host benchmark as a way to compare algorithms, and measure the target when the question is about the target.
 
 ## `tests/raylib_stub/`
 
@@ -2118,6 +2138,8 @@ This appendix is the quick-reference answer to “What is this particular file f
 | `shared/src/gfx.h` | Public renderer structures, flags, callbacks, and function declarations. |
 | `shared/src/gfx.c` | Core renderer: tiles, clips, primitives, sprites, RLE, tilemaps, dirty regions, and frame traversal. |
 | `shared/src/gfx_triangle.c` | Filled-triangle scanline rasterizer. |
+| `shared/src/gfx_rgb444.h` | Declares RGB565-to-packed-12-bit conversion. |
+| `shared/src/gfx_rgb444.c` | Converts RGB565 to 12 bpp for panels with a 12-bit interface. Currently unused: measured on SPI it lost more to byte-framing overhead than it saved in bytes. |
 | `shared/src/gfx_font5x7.h` | Declares tiny-font drawing functions. |
 | `shared/src/gfx_font5x7.c` | Stores and draws the built-in 5×7 bitmap font. |
 | `shared/src/gfx_engine.h` | Declares actors, animations, collision maps, cameras, and helpers. |
@@ -2197,6 +2219,7 @@ This appendix is the quick-reference answer to “What is this particular file f
 | `scripts/mr_clean.bat` | Deletes build outputs while preserving source. |
 | `scripts/mr_tools.bat` | Locates required external tools. |
 | `scripts/mr_preset_flags.py` | Helps derive or normalize Pico preset/build settings. |
+| `scripts/mr_frmctr_sweep.bat` | Builds one Pico image per ILI9341 panel-refresh setting, for finding the fastest value a given panel tolerates. |
 
 ## Tests
 

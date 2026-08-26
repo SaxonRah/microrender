@@ -160,7 +160,7 @@ deleted and configured again automatically.
 ### Command-line overrides
 
 ```powershell
-.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4 hud=2
+.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=8 hud=2
 .\mr.bat build pico stress-visible tile=240 sprites=1024 pipeline=ON serial=ON
 .\mr.bat build pico game presentation=pipelined tile=240 sys=300000 spi=75000000
 ```
@@ -180,6 +180,21 @@ deleted and configured again automatically.
 | `serial=ON/OFF` | stress/game verbose USB logs |
 | `diag=ON/OFF` | `MR_STRESS_PICO_DIAG` |
 
+Presentation and panel options have no short alias and are passed by their full
+cache variable name:
+
+| variable | default | purpose |
+| --- | --- | --- |
+| `MR_PICO_PRESENT_CORE1` | `ON` for `stress-lace`, otherwise `OFF` | present lace row groups from core 1 while core 0 renders the next frame; costs a second 150 KiB frame buffer |
+| `MR_STRESS_LACE_PHASES` | `2` | `1` presents every row every frame instead of alternating groups |
+| `MR_ILI9341_FRMCTR1_RTNA` | `0x1B` | panel refresh rate; lower is faster, and too low washes the display out |
+| `MR_ILI9341_FRMCTR1_DIVA` | `0x00` | panel oscillator division ratio |
+
+`MR_ILI9341_FRMCTR1_*` defaults reproduce the ILI9341 reset state and the
+register write is compiled out entirely unless changed. See
+`PICO_PRESENTATION_MODES.md` for a measured sweep; on the tested panel nothing
+above the default helped and the faster settings degraded contrast.
+
 Any cache variable beginning with `MR_` can be passed directly:
 
 ```powershell
@@ -196,7 +211,7 @@ that would stop being the intended clear/draw-complete-frame/send baseline.
 Append `vscode` to configure one selected preset into `microrender/build`:
 
 ```powershell
-.\mr.bat build pico stress-lace sprites=1024 lace=4 hud=2 vscode
+.\mr.bat build pico stress-lace sprites=1024 lace=8 hud=2 vscode
 ```
 
 The repository's VS Code project then uses:

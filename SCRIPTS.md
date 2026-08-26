@@ -49,6 +49,7 @@ CMake. DOS accepts only its documented aliases.
 | `scripts/mr_run.bat` | DOSBox, Raylib, CTest, and benchmark launcher |
 | `scripts/mr_tools.bat` | CMake, Open Watcom, and DOSBox discovery |
 | `scripts/mr_clean.bat` | build-output cleanup |
+| `scripts/mr_frmctr_sweep.bat` | builds one Pico image per ILI9341 panel-refresh setting |
 | `scripts/mr_preset_flags.py` | reads Pico preset cache variables and binary directories |
 | `microrender/pico_env_auto.bat` | Pico SDK/toolchain/Ninja environment discovery |
 | `microrender_dos/build_watcom*.bat` | low-level 16-bit compiler/linker commands |
@@ -59,8 +60,8 @@ CMake. DOS accepts only its documented aliases.
 ```powershell
 .\mr.bat build dos mode=both tile=16 vsync=0
 .\mr.bat build pico game-raw
-.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=4
-.\mr.bat build pico stress-lace sprites=1024 lace=4 vscode
+.\mr.bat build pico stress-lace sprites=1024 sys=300000 spi=75000000 lace=8
+.\mr.bat build pico stress-lace sprites=1024 lace=8 vscode
 .\mr.bat build pico all
 .\mr.bat build raylib
 .\mr.bat build raylib raylib=C:\src\raylib demo=game mode=tiled tile=16 scale=3
@@ -86,20 +87,32 @@ to the DOS executable.
 
 ## Pico preset directories
 
-Normal preset builds use the `binaryDir` declared in
-`microrender/CMakePresets.json`. The final `vscode` token instead configures the
-selected preset into `microrender/build` so the checked-in VS Code flash/debug
-configuration points at the correct ELF/UF2.
+Each Pico preset has its own `binaryDir`, so different presets never share a
+build directory. Different *flags* passed to the same preset do share one:
+`build pico stress-lace MR_FOO=ON` and `build pico stress-lace` both land in
+`build-stress-lace`.
 
-Before configuration, the build driver deletes a Pico cache when any of these no
-longer match:
+CMake cache variables persist, so the second command does not clear `MR_FOO` --
+it simply never mentions it. Left alone, that produces a binary that does not
+match the command that built it.
 
-- Ninja generator
-- `arm-none-eabi-gcc`
-- current absolute source directory
-- current absolute cache/build directory
+`mr_build.bat` therefore stamps the flags into `.mr_build_flags` inside the
+build directory and wipes it when they change, printing what differed:
 
-That makes a checkout safe to move without manually hunting stale CMake caches.
+```text
+[pico] build flags changed since this directory was configured.
+       was: stress-lace  -DMR_STRESS_LACE_BLOCK_H=4
+       now: stress-lace  -DMR_STRESS_LACE_BLOCK_H=8
+```
+
+The wipe retries for a few seconds. Windows can hold a handle on freshly
+written build output after the writing process exits -- `.ninja_log` is the
+usual casualty, and antivirus scanning a just-finished build makes it common
+rather than rare. If it still fails, close any editor or terminal sitting in
+that directory.
+
+The directory is also wiped when the generator, toolchain, source path, or
+build path no longer match the cache.
 
 ## Raylib submodule behavior
 
