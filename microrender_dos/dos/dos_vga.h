@@ -37,6 +37,13 @@ unsigned long dos_vga_ticks(void);
    71 minutes, which is harmless for frame deltas. */
 unsigned long dos_vga_micros(void);
 
+/* Put PIT channel 0 into mode 2 so dos_vga_micros() reads a monotonic count,
+   and restore the BIOS mode 3 afterwards. dos_vga_enter/leave call these, so
+   most callers never need them. The divisor is unchanged either way, so the
+   18.2 Hz BIOS tick and DOS timekeeping are unaffected. */
+void dos_vga_timer_begin(void);
+void dos_vga_timer_end(void);
+
 void dos_vga_flush_tile(gfx_renderer_t GFX_PTR *r, int x, int y, int w, int h,
                         const gfx_color_t GFX_PTR *pixels,
                         void GFX_PTR *user);

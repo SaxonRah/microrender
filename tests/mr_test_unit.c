@@ -683,10 +683,26 @@ static void test_timestep(void) {
      stall back over many frames and the game runs fast afterwards. */
   mr_timestep_init(&ts, 60, 5);
   (void)mr_timestep_advance(&ts, 0ul);
-  n = mr_timestep_advance(&ts, 10000000ul); /* ten second freeze */
-  MRT_CHECK_EQ_INT(n, 5, "stall is capped at max_steps");
-  n = mr_timestep_advance(&ts, 10000000ul + 16666ul);
-  MRT_CHECK_EQ_INT(n, 1, "no catch-up burst after the stall");
+  n = mr_timestep_advance(&ts, 200000ul); /* 0.2s hitch: real, just slow */
+  MRT_CHECK_EQ_INT(n, 5, "slow frame is capped at max_steps");
+  n = mr_timestep_advance(&ts, 200000ul + 16666ul);
+  MRT_CHECK_EQ_INT(n, 1, "no catch-up burst after the hitch");
+
+  /* Beyond a second is not a slow frame, it is a broken clock. Clamping such a
+     delta to the cap makes the simulation run at max_steps every frame
+     forever, which is how a mis-read DOS timer produced an 11x speedup rather
+     than a visible stutter. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 0ul);
+  MRT_CHECK_EQ_INT(mr_timestep_advance(&ts, 10000000ul), 0,
+                   "implausible delta is dropped, not clamped");
+
+  /* A backwards clock is the same thing through unsigned arithmetic, and must
+     not be mistaken for an enormous forward jump. */
+  mr_timestep_init(&ts, 60, 5);
+  (void)mr_timestep_advance(&ts, 5000000ul);
+  MRT_CHECK_EQ_INT(mr_timestep_advance(&ts, 4000000ul), 0,
+                   "backwards clock is dropped");
 
   /* Counter wrap. DOS wraps about every 71 minutes; unsigned subtraction has
      to keep working across it or the game freezes for the length of the gap. */

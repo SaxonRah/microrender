@@ -95,9 +95,39 @@ static void dos_vga_enter_modex_320x240(void) {
   _fmemset(dos_vga_base, 0, 65535u);
 }
 
+/* PIT channel 0: lobyte/hibyte access, binary counting. 0x34 selects mode 2,
+   0x36 selects mode 3, which is what the BIOS leaves it in. */
+#define DOS_PIT_MODE2 0x34u
+#define DOS_PIT_MODE3 0x36u
+
+static int dos_pit_mode2 = 0;
+
+void dos_vga_timer_begin(void) {
+  if (dos_pit_mode2)
+    return;
+  _disable();
+  outp(0x43, DOS_PIT_MODE2);
+  outp(0x40, 0x00); /* divisor 65536, low byte */
+  outp(0x40, 0x00); /* divisor 65536, high byte */
+  _enable();
+  dos_pit_mode2 = 1;
+}
+
+void dos_vga_timer_end(void) {
+  if (!dos_pit_mode2)
+    return;
+  _disable();
+  outp(0x43, DOS_PIT_MODE3);
+  outp(0x40, 0x00);
+  outp(0x40, 0x00);
+  _enable();
+  dos_pit_mode2 = 0;
+}
+
 void dos_vga_enter(void) {
   if (dos_vga_mode_active)
     return;
+  dos_vga_timer_begin();
   dos_vga_enter_modex_320x240();
   dos_vga_mode_active = 1;
   dos_vga_init_rgb565_table();
@@ -109,6 +139,7 @@ void dos_vga_leave(void) {
     return;
   dos_vga_mode_active = 0;
   dos_vga_set_mode(DOS_VGA_MODE_TEXT);
+  dos_vga_timer_end();
 }
 
 int dos_vga_active(void) { return dos_vga_mode_active; }
@@ -141,13 +172,23 @@ unsigned long dos_vga_ticks(void) { return *dos_vga_bios_ticks; }
  * 140 FPS this frontend reaches under DOSBox a frame is about 7 ms, so the
  * counter does not move for eight frames and then jumps a whole tick.
  *
- * PIT channel 0 is what drives that counter. It counts down from 65536 at
- * 1,193,182 Hz and reloads on every BIOS tick, so latching its current count
- * gives the fraction of a tick elapsed, at roughly 838 ns per step.
+ * PIT channel 0 drives that counter at 1,193,182 Hz with a divisor of 65536.
+ * Latching its current count (command 0x00 to port 0x43) gives the fraction of
+ * a tick elapsed, at roughly 838 ns per step.
  *
- * Latching (command 0x00 to port 0x43) only samples the counter into a holding
- * register; it does not reprogram the timer or disturb the BIOS interrupt. DOS
- * timekeeping is unaffected.
+ * One catch, and it is the reason this needs dos_vga_timer_begin(): the BIOS
+ * programs channel 0 in mode 3, square wave. Mode 3 decrements the counter by
+ * *two* per clock, so a 65536-to-0 sweep takes half a tick and happens twice
+ * per tick. Read naively, elapsed-within-tick runs twice too fast, cannot tell
+ * which half of the tick it is in, and is a sawtooth -- so the combined
+ * timestamp jumps backwards twice per tick. Feed that to an accumulator doing
+ * unsigned subtraction and every backwards step becomes an enormous delta.
+ *
+ * Reprogramming channel 0 to mode 2 (rate generator) with the same divisor
+ * fixes it: mode 2 decrements by one and sweeps once per tick, so the count
+ * maps directly onto elapsed time. The divisor is unchanged, so IRQ 0 still
+ * fires at 18.2 Hz and DOS timekeeping is untouched. Mode 3 is restored on
+ * exit anyway, since leaving the machine as we found it costs two writes.
  *
  * The BIOS tick and the PIT counter must be read carefully: if the tick
  * increments between the two reads, combining them yields a time that jumps

@@ -71,6 +71,7 @@ typedef struct host_state {
   unsigned long frames;
   double start_time;
   mr_timestep_t step;
+  unsigned long sim_ticks;
 } host_state_t;
 
 static int arg_eq(const char *a, const char *b) { return strcmp(a, b) == 0; }
@@ -364,6 +365,7 @@ int main(int argc, char **argv) {
      default, so without this the demo runs at whatever rate the GPU happens to
      manage -- thousands of frames a second on a desktop. */
   mr_timestep_init(&host.step, 60, 5);
+  host.sim_ticks = 0ul;
   host.start_time = GetTime();
   printf("MicroRender Raylib: 320x240 RGB565 demo=%s mode=%s tile=%d sprites=%d\n",
          host.opt.demo == MR_HOST_DEMO_GAME ? "game" : "stress",
@@ -398,15 +400,21 @@ int main(int argc, char **argv) {
 
     if (host.opt.demo == MR_HOST_DEMO_GAME) {
       mr_demo_input_t input;
-      if (host.opt.autoplay)
-        mr_autodemo_input(host.frames, &input);
-      else
+      int steps = mr_timestep_advance(&host.step,
+                                      (unsigned long)(GetTime() * 1000000.0));
+      /* The scripted input is a function of simulation time, not of how often
+         the host redraws. Indexing it by frame made the autopilot change
+         direction thousands of times a second on an uncapped window, so it
+         turned on the spot instead of travelling. Live input is sampled once
+         per frame and reused for every step of that frame, which is what a
+         player's held key actually means. */
+      if (!host.opt.autoplay)
         host_input(&input);
-      {
-        int steps = mr_timestep_advance(&host.step,
-                                        (unsigned long)(GetTime() * 1000000.0));
-        while (steps-- > 0)
-          mr_game_demo_tick(&host.game, &input);
+      while (steps-- > 0) {
+        if (host.opt.autoplay)
+          mr_autodemo_input(host.sim_ticks, &input);
+        mr_game_demo_tick(&host.game, &input);
+        ++host.sim_ticks;
       }
       if (mr_game_demo_quit_requested(&host.game))
         break;
@@ -414,8 +422,10 @@ int main(int argc, char **argv) {
       {
         int steps = mr_timestep_advance(&host.step,
                                         (unsigned long)(GetTime() * 1000000.0));
-        while (steps-- > 0)
+        while (steps-- > 0) {
           mr_stress_tick(&host.stress);
+          ++host.sim_ticks;
+        }
       }
     }
 

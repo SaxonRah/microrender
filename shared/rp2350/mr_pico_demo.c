@@ -41,6 +41,7 @@ static gfx_color_t tile_buffer_b[MR_SCREEN_W * MR_TILE_H];
 static gfx_renderer_t renderer;
 static mr_game_demo_t game_demo;
 static mr_timestep_t demo_step;
+static unsigned long sim_ticks;
 static mr_pico_screenshot_t screenshot_service;
 
 static mr_pico_ili9341_t lcd = {
@@ -119,11 +120,16 @@ void mr_pico_demo_main(void) {
 
 
   for (;;) {
-    mr_autodemo_input(frame_counter, &input);
     {
+      /* Scripted input is indexed by simulation tick, not frame: the autopilot
+         describes a path through the world, and that path must not depend on
+         how fast the panel is being redrawn. */
       int steps = mr_timestep_advance(&demo_step, (unsigned long)time_us_32());
-      while (steps-- > 0)
+      while (steps-- > 0) {
+        mr_autodemo_input(sim_ticks, &input);
         mr_game_demo_tick(&game_demo, &input);
+        ++sim_ticks;
+      }
     }
 
 #if MR_GAME_PRESENT_MODE == 0

@@ -72,6 +72,7 @@ typedef struct dos_options {
 } dos_options_t;
 
 static mr_timestep_t dos_step;
+static unsigned long dos_sim_ticks;
 
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
 static mr_game_demo_t dos_game;
@@ -398,6 +399,7 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   mr_autodemo_reset();
 
   frame = 0UL;
+  dos_sim_ticks = 0UL;
   mr_timestep_init(&dos_step, 60, 5);
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
@@ -406,16 +408,21 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   running = 1;
 
   while (running) {
-    if (opt->autoplay) {
-      mr_autodemo_input(frame, &input);
-    } else {
+    if (!opt->autoplay)
       dos_read_keyboard_input(&input);
-    }
 
     {
+      /* Scripted input is indexed by simulation tick rather than frame, so the
+         autopilot follows the same path whether the host manages 15 frames a
+         second or 140. Live keyboard input is sampled once per frame and
+         reused for every step, which is what a held key means. */
       int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
-      while (steps-- > 0)
+      while (steps-- > 0) {
+        if (opt->autoplay)
+          mr_autodemo_input(dos_sim_ticks, &input);
         mr_game_demo_tick(&dos_game, &input);
+        ++dos_sim_ticks;
+      }
     }
     gfx_render_tiled(&dos_renderer, dos_draw_game_scene, &dos_game,
                      GFX_RGB565_BLACK);

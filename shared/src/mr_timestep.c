@@ -4,6 +4,10 @@
 #define MR_TIMESTEP_MAX_HZ 1000
 #define MR_TIMESTEP_MAX_CAP 64
 
+/* One second. Longer than any real frame on any target here, and short enough
+   that a broken clock is caught on the first bad read. */
+#define MR_TIMESTEP_GLITCH_US 1000000ul
+
 void mr_timestep_init(mr_timestep_t *ts, int hz, int max_steps) {
   if (!ts)
     return;
@@ -57,10 +61,21 @@ int mr_timestep_advance(mr_timestep_t *ts, unsigned long now_us) {
   delta = now_us - ts->last_us;
   ts->last_us = now_us;
 
-  /* Discard anything beyond what the cap could consume anyway. Without this
-     the accumulator banks the whole stall -- a breakpoint, a long flash write,
-     a USB enumeration pause -- and then pays it back max_steps at a time over
-     many frames, so the game runs fast for a while after every hitch. */
+  /* A delta beyond any plausible frame is not a slow frame, it is a broken
+     clock: a counter that ran backwards, a timer read torn across an update,
+     a wrap mishandled upstream. Unsigned subtraction turns any backwards step
+     into a huge positive number, so clamping such a delta to the cap would
+     silently run max_steps every frame and the simulation would sprint.
+     That is exactly what a mis-read PIT did on DOS -- an 11x speedup rather
+     than a visible hiccup. Drop these instead of clamping them; one skipped
+     frame of simulation is invisible, a permanent speedup is not. */
+  if (delta > MR_TIMESTEP_GLITCH_US)
+    return 0;
+
+  /* Below that, a genuinely slow frame is clamped rather than banked. Banking
+     it means a breakpoint or a USB enumeration pause is paid back max_steps at
+     a time over the following frames, so the game runs fast after every
+     hitch. */
   budget = (unsigned long)ts->max_steps * ts->step_us;
   if (delta > budget)
     delta = budget;
