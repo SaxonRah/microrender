@@ -27,7 +27,7 @@ RP2350, and desktop hosts.
 #### Pico2 - 76 FPS
 ![Pico 2 capture](https://raw.githubusercontent.com/SaxonRah/microrender/main/microrender/pico2_screenshot.png)
 
-## Architechture
+## Architecture
 ```
                     microrender_gfx
                           │
