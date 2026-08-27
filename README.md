@@ -27,6 +27,26 @@ RP2350, and desktop hosts.
 #### Pico2 - 76 FPS
 ![Pico 2 capture](https://raw.githubusercontent.com/SaxonRah/microrender/main/microrender/pico2_screenshot.png)
 
+## Architechture
+```
+                    microrender_gfx
+                          │
+                    NO CLOCK / FPS
+                          │
+              unrestricted rendering
+                          │
+          ┌───────────────┴───────────────┐
+          │                               │
+         GAME                           STRESS
+          │                               │
+ deterministic fixed 60 Hz        deterministic 1 tick/frame
+          │                               │
+ render can be 53 FPS             runs as fast as target can
+ or 4300+ FPS                     render
+          │                               │
+ game speed unchanged             workload rate == render rate
+ ```
+
 ## Clone and initialize dependencies
 
 Raylib is pinned as a Git submodule under `third_party/raylib`.
