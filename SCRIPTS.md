@@ -239,6 +239,11 @@ is not meaningful.
 Only the standard library is needed for Raylib capture, including PNG encoding.
 Pico capture needs `pyserial`.
 
+Rows accumulate across runs, keyed by platform and case, so capturing one
+platform at a time builds the comparison up rather than replacing it.
+Re-capturing a platform updates its row in place. Delete `capture\` to start
+over.
+
 The column worth reading in the report is `sim_hz`, not `fps_avg`. Frame rate
 is expected to differ by orders of magnitude between a Pico and an uncapped
 desktop window; the simulation rate is not, because the timestep is fixed. If

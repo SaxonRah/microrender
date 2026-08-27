@@ -417,7 +417,7 @@ def finish(platform, label, shot_path, fields):
     try:
         with open(shot_path, "rb") as f:
             w, h, body = parse_shot(f.read())
-        png = shot_path[:-5] + ".png"
+        png = os.path.splitext(shot_path)[0] + ".png"
         write_png(png, rgb565_to_rgb888(body, w, h), w, h)
         os.remove(shot_path)
         row["image"] = os.path.basename(png)
@@ -431,7 +431,46 @@ def finish(platform, label, shot_path, fields):
 
 # --------------------------------------------------------------------------
 
+def merge_rows(rows):
+    """Fold this run's rows into whatever a previous run left behind.
+
+    Each invocation captures one platform, so writing only the current rows
+    means the report never shows more than the last thing captured -- and the
+    whole point of it is the comparison across platforms. Rows are keyed by
+    platform and case, so re-capturing a platform replaces its row rather than
+    duplicating it, and the others survive.
+    """
+    prior = []
+    csv_path = os.path.join(OUT, "report.csv")
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, "r", newline="") as f:
+                prior = [dict(r) for r in csv.DictReader(f)]
+        except (OSError, csv.Error):
+            prior = []
+
+    fresh = {(r.get("platform"), r.get("case")): r for r in rows}
+    merged = []
+    for r in prior:
+        key = (r.get("platform"), r.get("case"))
+        if key in fresh:
+            merged.append(fresh.pop(key))
+        else:
+            # Drop rows whose image has since been deleted, so a cleared
+            # capture directory does not leave broken links in the report.
+            img = r.get("image", "")
+            if img.endswith(".png") and not os.path.exists(
+                    os.path.join(OUT, img)):
+                continue
+            merged.append(r)
+    for r in rows:
+        if (r.get("platform"), r.get("case")) in fresh:
+            merged.append(r)
+    return merged
+
+
 def write_reports(rows):
+    rows = merge_rows(rows)
     keys = []
     for r in rows:
         for k in r:
@@ -461,7 +500,10 @@ def write_reports(rows):
                         (r["platform"], r["case"], r["case"], img))
         f.write("\n`sim_hz` is the number that should agree across platforms.\n"
                 "Frame rate is expected to differ by orders of magnitude; the\n"
-                "simulation rate should not, because the timestep is fixed.\n")
+                "simulation rate should not, because the timestep is fixed.\n\n"
+                "Rows accumulate across runs, so capturing one platform at a\n"
+                "time builds the comparison up. Delete `capture/` to start\n"
+                "over.\n")
 
 
 def main(argv):
