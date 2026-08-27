@@ -225,6 +225,30 @@ the faster one *looked* smoother largely because the simulation was running
 quicker. That is a property of the benchmark, and easy to credit to the
 renderer.
 
+**Measured afterwards**, same scene and shared source on all three targets,
+captured with `mr_capture.py all`:
+
+| platform | case | fps_avg | sim_hz |
+| --- | --- | ---: | ---: |
+| raylib | game-tiled16 | 4237.52 | 59.33 |
+| raylib | game-raw | 4504.68 | 59.12 |
+| raylib | stress-visible-512 | 4283.56 | 59.43 |
+| raylib | stress-lace-1024 | 4363.33 | 59.45 |
+| raylib | stress-render-1024 | 4308.30 | 59.24 |
+| dos | game-tiled | 131.41 | 59.14 |
+| dos | game-raw | 53.12 | 59.54 |
+| pico | stress-lace | 110.65 | 59.90 |
+
+Frame rate spans a factor of 85. Simulation rate spans 0.8%. That is the whole
+claim, and it is now reproducible rather than argued.
+
+Two side notes from the same table. DOS tiled against DOS raw is 131 versus 53
+FPS on identical hardware and scene, which is the cost of staging a whole frame
+before presenting it rather than sending strips as they are drawn. And the
+Raylib rows are all around 4,300 FPS regardless of mode, because at that rate
+the frontend is bound by window presentation rather than by anything this
+renderer does.
+
 **Two bugs it introduced, both found on hardware.**
 
 *Autoplay turned circles.* The scripted input was indexed by frame counter, so

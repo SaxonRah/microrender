@@ -186,9 +186,13 @@ because a debug probe enumerates under the same `2E8A` and picking the first
 match lands on the probe as often as on the board.
 
 `picotool` reboots via the watchdog, which restarts the core without
-power-cycling the panel or the second core. If the display comes up white after
-an automatic flash, unplug the board, plug it back in, and capture without the
-flash step:
+power-cycling the panel or the second core. Observed once: a board flashed this
+way came up with a white display and needed a manual reflash to recover. The
+mechanism is unconfirmed -- a warm reboot leaving core 1 or the panel in a
+stale state is consistent with it, but it has not been reproduced deliberately.
+
+If the display comes up white after an automatic flash, power-cycle the board
+and capture without the flash step:
 
 ```powershell
 python scripts\mr_capture.py pico
