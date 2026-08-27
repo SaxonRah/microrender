@@ -554,10 +554,35 @@ int main(int argc, char **argv) {
       break;
   }
 
-  if (host.opt.shot_path)
-    (void)write_shot(host.opt.shot_path, host.frame, MR_HOST_W, MR_HOST_H);
-  if (host.opt.report_path)
-    (void)write_report(host.opt.report_path, &host, GetTime() - host.start_time);
+  {
+    double final_elapsed;
+
+    /* Freeze the measured interval before any capture-only rendering. */
+    final_elapsed = GetTime() - host.start_time;
+
+    if (host.opt.shot_path) {
+      int saved_texture_ready;
+
+      /* Capture the logical scene after the timed run. Tiled presentation
+         uploads strips directly to the GPU texture, so host.frame is not a
+         reliable logical framebuffer in that mode. Disable the direct texture
+         fast path, re-render once into staging, and write that completed image.
+         This keeps screenshot work completely outside the benchmark interval. */
+      saved_texture_ready = host.texture_ready;
+      host.texture_ready = 0;
+      if (host.opt.demo == MR_HOST_DEMO_GAME)
+        gfx_render_tiled(&host.renderer, draw_game, &host, GFX_RGB565_BLACK);
+      else
+        gfx_render_tiled(&host.renderer, draw_stress, &host, GFX_RGB565_BLACK);
+      host.texture_ready = saved_texture_ready;
+
+      (void)write_shot(host.opt.shot_path, host.staging,
+                       MR_HOST_W, MR_HOST_H);
+    }
+
+    if (host.opt.report_path)
+      (void)write_report(host.opt.report_path, &host, final_elapsed);
+  }
 
   host.texture_ready = 0;
   UnloadTexture(texture);

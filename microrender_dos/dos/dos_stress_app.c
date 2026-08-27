@@ -56,6 +56,98 @@ static void draw_stress_scene(gfx_renderer_t GFX_PTR *r, void GFX_PTR *user) {
   mr_stress_render(r, (mr_stress_test_t GFX_PTR *)user);
 }
 
+/* DOS stress capture uses the same MRSHOT1 logical RGB565 format as the game,
+   Raylib, and Pico. Re-render through a temporary flush callback after timing
+   ends so capture work cannot affect the benchmark. */
+static FILE *dos_shot_file;
+static int dos_shot_failed;
+
+static void dos_shot_flush(gfx_renderer_t GFX_PTR *r, int x, int y, int w,
+                           int h, const gfx_color_t GFX_PTR *pixels,
+                           void GFX_PTR *user) {
+  int row;
+  int stride;
+  (void)x;
+  (void)y;
+  (void)user;
+  if (!dos_shot_file || dos_shot_failed || !pixels || w <= 0 || h <= 0)
+    return;
+  stride = r ? r->tile_stride : w;
+  for (row = 0; row < h; ++row) {
+    size_t got;
+    got = fwrite(pixels + (long)row * stride, sizeof(gfx_color_t),
+                 (size_t)w, dos_shot_file);
+    if (got != (size_t)w) {
+      dos_shot_failed = 1;
+      return;
+    }
+  }
+}
+
+static int dos_write_shot(const char *path) {
+  gfx_flush_fn saved_flush;
+  void GFX_PTR *saved_user;
+  int ok;
+
+  if (!path)
+    return 0;
+  dos_shot_file = fopen(path, "wb");
+  if (!dos_shot_file)
+    return 0;
+  dos_shot_failed = 0;
+
+  fprintf(dos_shot_file, "MRSHOT1 %d %d %lu\n",
+          DOS_SCREEN_W, DOS_SCREEN_H,
+          (unsigned long)DOS_FRAME_PIXELS *
+              (unsigned long)sizeof(gfx_color_t));
+
+  saved_flush = dos_renderer.flush;
+  saved_user = dos_renderer.user;
+  dos_renderer.flush = dos_shot_flush;
+  dos_renderer.user = 0;
+  gfx_render_tiled(&dos_renderer, draw_stress_scene, &stress,
+                   GFX_RGB565_BLACK);
+  dos_renderer.flush = saved_flush;
+  dos_renderer.user = saved_user;
+
+  ok = !dos_shot_failed;
+  if (fclose(dos_shot_file) != 0)
+    ok = 0;
+  dos_shot_file = 0;
+  return ok;
+}
+
+static int dos_write_report(const char *path, int sprite_count,
+                            unsigned long frames, unsigned long elapsed_us,
+                            int no_vsync) {
+  FILE *f;
+  double secs;
+
+  if (!path)
+    return 0;
+  f = fopen(path, "wb");
+  if (!f)
+    return 0;
+
+  secs = (double)elapsed_us / 1000000.0;
+  fprintf(f, "platform=dos\n");
+  fprintf(f, "demo=stress\n");
+  fprintf(f, "mode=%s\n", MR_DOS_PRESENT_MODE == 0 ? "raw" : "tiled");
+  fprintf(f, "width=%d\nheight=%d\n", DOS_SCREEN_W, DOS_SCREEN_H);
+  fprintf(f, "tile_h=%d\n", DOS_TILE_H);
+  fprintf(f, "sprites=%d\n", sprite_count);
+  fprintf(f, "vsync=%d\n", no_vsync ? 0 : 1);
+  fprintf(f, "frames=%lu\n", frames);
+  fprintf(f, "elapsed_s=%.4f\n", secs);
+  fprintf(f, "fps_avg=%.2f\n",
+          secs > 0.0 ? (double)frames / secs : 0.0);
+  fprintf(f, "sim_ticks=%lu\n", frames);
+  fprintf(f, "sim_hz=%.2f\n",
+          secs > 0.0 ? (double)frames / secs : 0.0);
+  fclose(f);
+  return 1;
+}
+
 static int parse_int_arg(int argc, char **argv, int *i, int fallback) {
   if (*i + 1 >= argc)
     return fallback;
@@ -68,9 +160,10 @@ static void print_usage(void) {
   printf("Usage: mstress [/sprites N] [/frames N] [/novsync] [/noflush] "
          "[/nohud]\n");
   printf("               [/notri] [/nostats] [/fullstats] [/statsrate N]\n");
-  printf("               [/notile] [/nocollide]\n");
+  printf("               [/notile] [/nocollide] [/shot=FILE] [/report=FILE]\n");
   printf("Examples:\n");
   printf("  mstress /sprites 512 /frames 2100 /novsync\n");
+  printf("  mstress /sprites 512 /frames 2000 /shot=dos.bin /report=dos.txt\n");
   printf("  mstress /sprites 1024 /frames 2100 /novsync\n");
   printf("  mstress /sprites 1024 /frames 2100 /novsync /noflush\n");
   printf("  mstress /sprites 1024 /frames 2100 /novsync /fullstats\n");
@@ -86,12 +179,18 @@ int main(int argc, char **argv) {
   unsigned long fps10;
   unsigned long avg_fps10;
   unsigned long frames;
+  unsigned long start_us;
+  unsigned long end_us;
   int frame_limit;
   int no_vsync;
+  const char *shot_path;
+  const char *report_path;
   int i;
 
   frame_limit = 2100;
   no_vsync = MR_DOS_VSYNC ? 0 : 1;
+  shot_path = 0;
+  report_path = 0;
 
   mr_stress_config_defaults(&cfg, DOS_SCREEN_W, DOS_SCREEN_H);
   cfg.sprite_count = 512;
@@ -138,6 +237,22 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "/nocollide") == 0 ||
                strcmp(argv[i], "-nocollide") == 0) {
       cfg.features &= ~MR_STRESS_FEATURE_COLLISION;
+    } else if ((strcmp(argv[i], "/shot") == 0 ||
+                strcmp(argv[i], "-shot") == 0) &&
+               i + 1 < argc) {
+      ++i;
+      shot_path = argv[i];
+    } else if (strncmp(argv[i], "/shot=", 6) == 0 ||
+               strncmp(argv[i], "-shot=", 6) == 0) {
+      shot_path = argv[i] + 6;
+    } else if ((strcmp(argv[i], "/report") == 0 ||
+                strcmp(argv[i], "-report") == 0) &&
+               i + 1 < argc) {
+      ++i;
+      report_path = argv[i];
+    } else if (strncmp(argv[i], "/report=", 8) == 0 ||
+               strncmp(argv[i], "-report=", 8) == 0) {
+      report_path = argv[i] + 8;
     }
   }
 
@@ -173,6 +288,7 @@ int main(int argc, char **argv) {
   mr_stress_init(&stress, &cfg);
 
   dos_vga_enter();
+  start_us = dos_vga_micros();
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
   fps_frame = 0;
@@ -194,6 +310,7 @@ int main(int argc, char **argv) {
 #endif
     delay(250);
     dos_vga_set_flush_enabled(saved_flush);
+    start_us = dos_vga_micros();
     start_tick = dos_vga_ticks();
     fps_tick = start_tick;
     fps_frame = 0;
@@ -249,10 +366,18 @@ int main(int argc, char **argv) {
       dos_vga_wait_vblank();
   }
 
+  end_us = dos_vga_micros();
   end_tick = dos_vga_ticks();
   mr_stress_get_metrics(&stress, &m);
 
+  if (shot_path)
+    (void)dos_write_shot(shot_path);
+
   dos_vga_leave();
+
+  if (report_path)
+    (void)dos_write_report(report_path, cfg.sprite_count, frames,
+                           end_us - start_us, no_vsync);
 #if MR_DOS_PRESENT_MODE == 0
   hfree(dos_raw_frame);
   dos_raw_frame = 0;

@@ -239,12 +239,14 @@ def check_pico_config(fields, preset):
     return problems
 
 
-# mr.bat run target -> label. The two game binaries differ only in present
-# mode, which is the comparison worth capturing: tiled strips versus a full
-# staged frame. The stress binaries have no capture hooks yet.
+# mr.bat run target -> label. Capture both game and stress in raw/tiled modes:
+# game proves fixed wall-clock simulation while stress proves the deliberate
+# one-update-per-render-frame benchmark policy.
 DOS_CASES = [
     ("dos", "game-tiled"),
     ("dosraw", "game-raw"),
+    ("stress", "stress-tiled"),
+    ("stressraw", "stress-raw"),
 ]
 
 
@@ -267,10 +269,15 @@ def capture_dos_case(rows, target, label, frames):
     """
     dosroot = os.path.join(ROOT, "microrender_dos", "dosroot")
     dist = os.path.join(ROOT, "microrender_dos", "dist")
-    exe = {"dos": "mrender.exe", "dosraw": "mraw.exe"}.get(target, "mrender.exe")
+    exe = {
+        "dos": "mrender.exe",
+        "dosraw": "mraw.exe",
+        "stress": "mstress.exe",
+        "stressraw": "msraw.exe",
+    }.get(target, "mrender.exe")
     if not (os.path.exists(os.path.join(dosroot, exe)) or
             os.path.exists(os.path.join(dist, exe))):
-        print("dos: mrender.exe not in dosroot\\ or dist\\; run")
+        print("dos: %s not in dosroot\\ or dist\\; run" % exe)
         print("       .\\mr.bat build dos mode=both tile=16 vsync=0")
         return
 
@@ -287,8 +294,13 @@ def capture_dos_case(rows, target, label, frames):
     env["MR_DOSBOX_NOPAUSE"] = "1"
     # =value forms: a single token each, so nothing depends on how the runner
     # or DOS splits a two-token option.
-    cmd = [os.path.join(ROOT, "mr.bat"), "run", target, "/auto",
-           "/frames=%d" % frames, "/shot=dos.bin", "/report=dos.txt"]
+    if target in ("stress", "stressraw"):
+        cmd = [os.path.join(ROOT, "mr.bat"), "run", target, "512",
+               str(frames), "/shot=dos.bin", "/report=dos.txt"]
+    else:
+        cmd = [os.path.join(ROOT, "mr.bat"), "run", target, "/auto",
+               "/frames=%d" % frames, "/shot=dos.bin",
+               "/report=dos.txt"]
     print("dos: %s under DOSBox (cycles=%s); waiting for the capture ..."
           % (label, env.get("MR_DOSBOX_CYCLES", "max")))
     print("        %s" % " ".join(cmd[1:]))
@@ -302,15 +314,11 @@ def capture_dos_case(rows, target, label, frames):
         print("        could not run: %s" % exc)
         return
 
-    # Do not trust the runner to have blocked. DOSBox is a GUI-subsystem
-    # executable, and depending on the Windows shell and DOSBox build, the
-    # launcher can return while it is still running -- so subprocess.run
-    # completing says nothing about whether the program has run yet.
-    #
-    # Wait for the artifact instead, and wait for it to stop growing: the file
-    # appears when the frontend opens it and is only complete once the last
-    # tile has been written.
-    deadline = time.time() + 180.0
+    # mr_run.bat launches DOSBox with start /wait, so when
+    # subprocess.run() returns the DOS process has exited. Give the filesystem
+    # a short settling window, but do not wait minutes for an artifact that a
+    # failed argument parse can no longer create.
+    deadline = time.time() + 5.0
     stable = 0
     last = -1
     while time.time() < deadline:
@@ -318,12 +326,12 @@ def capture_dos_case(rows, target, label, frames):
             size = os.path.getsize(shot)
             if size == last and size > 0:
                 stable += 1
-                if stable >= 3:
+                if stable >= 2:
                     break
             else:
                 stable = 0
                 last = size
-        time.sleep(0.5)
+        time.sleep(0.25)
 
     if not os.path.exists(shot):
         # The frontend writes relative to the DOSBox working directory, which
@@ -352,8 +360,12 @@ def capture_dos_case(rows, target, label, frames):
             print("          cannot list: %s" % exc)
         print("        Run it by hand and read the DOSBox window before it")
         print("        closes; the frontend prints whether it wrote the file:")
-        print("       .\\mr.bat run dos /auto /frames=%d /shot=dos.bin"
-              % frames)
+        if target in ("stress", "stressraw"):
+            print("       .\\mr.bat run %s 512 %d /shot=dos.bin"
+                  % (target, frames))
+        else:
+            print("       .\\mr.bat run %s /auto /frames=%d /shot=dos.bin"
+                  % (target, frames))
         return
 
     dest = os.path.join(OUT, "dos-%s.bin" % label)
@@ -585,14 +597,12 @@ def flash_pico_swd(elf):
 
 
 def flash_pico_picotool(uf2):
-    """Keep the old USB/BootROM warm-flash path available explicitly."""
+    """Program the UF2 through the USB/BootROM picotool path."""
     tool = find_picotool()
     if not tool:
         print("        picotool not found")
         return False
 
-    print("        WARNING: picotool warm flashing is known to leave this")
-    print("        hardware's physical ILI9341 white. SWD is the default.")
     print("        picotool flashing %s" % os.path.basename(uf2))
     try:
         r = subprocess.run([tool, "load", "-f", "-x", uf2], timeout=180)
@@ -783,11 +793,9 @@ def finish(platform, label, shot_path, fields):
 def merge_rows(rows):
     """Fold this run's rows into whatever a previous run left behind.
 
-    Each invocation captures one platform, so writing only the current rows
-    means the report never shows more than the last thing captured -- and the
-    whole point of it is the comparison across platforms. Rows are keyed by
-    platform and case, so re-capturing a platform replaces its row rather than
-    duplicating it, and the others survive.
+    Capturing one platform replaces that platform's complete current case set.
+    Rows for platforms not touched by this invocation survive. This prevents a
+    renamed or retired benchmark case from remaining in report.csv forever.
     """
     prior = []
     csv_path = os.path.join(OUT, "report.csv")
@@ -798,23 +806,36 @@ def merge_rows(rows):
         except (OSError, csv.Error):
             prior = []
 
-    fresh = {(r.get("platform"), r.get("case")): r for r in rows}
+    refreshed_platforms = {
+        r.get("platform") for r in rows if r.get("platform")
+    }
+    fresh_images = {
+        r.get("image") for r in rows if r.get("image")
+    }
     merged = []
     for r in prior:
-        key = (r.get("platform"), r.get("case"))
-        if key in fresh:
-            merged.append(fresh.pop(key))
-        else:
-            # Drop rows whose image has since been deleted, so a cleared
-            # capture directory does not leave broken links in the report.
+        if r.get("platform") in refreshed_platforms:
+            # Remove artifacts for retired/renamed cases on a refreshed
+            # platform. Current-case images are overwritten by finish().
             img = r.get("image", "")
-            if img.endswith(".png") and not os.path.exists(
-                    os.path.join(OUT, img)):
-                continue
-            merged.append(r)
-    for r in rows:
-        if (r.get("platform"), r.get("case")) in fresh:
-            merged.append(r)
+            if img.endswith(".png") and img not in fresh_images:
+                base, _ext = os.path.splitext(img)
+                for stale_name in (img, base + ".txt"):
+                    try:
+                        os.remove(os.path.join(OUT, stale_name))
+                    except OSError:
+                        pass
+            continue
+
+        # Rows from untouched platforms survive, unless their image has been
+        # deleted independently (for example after manually clearing capture/).
+        img = r.get("image", "")
+        if img.endswith(".png") and not os.path.exists(
+                os.path.join(OUT, img)):
+            continue
+        merged.append(r)
+
+    merged.extend(rows)
     return merged
 
 
@@ -834,9 +855,11 @@ def write_reports(rows):
     with open(os.path.join(OUT, "report.md"), "w") as f:
         f.write("# Capture report\n\n")
         f.write("Generated %s\n\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
-        show = [k for k in ("platform", "case", "fps_avg", "fps", "sim_hz",
-                            "sim_ticks", "frames", "cycles", "cpuUs",
-                            "flushUs", "sentKB") if any(k in r for r in rows)]
+        show = [k for k in (
+            "platform", "case", "mode", "mode_name", "fps_avg", "fps",
+            "sim_hz", "sim_ticks", "frames", "cycles", "frameUs",
+            "updateUs", "rasterUs", "cpuUs", "flushUs", "sentKB"
+        ) if any(k in r for r in rows)]
         f.write("| " + " | ".join(show) + " |\n")
         f.write("|" + "|".join([" --- "] * len(show)) + "|\n")
         for r in rows:
@@ -847,12 +870,17 @@ def write_reports(rows):
             if img.endswith(".png"):
                 f.write("### %s / %s\n\n![%s](%s)\n\n" %
                         (r["platform"], r["case"], r["case"], img))
-        f.write("\n`sim_hz` is the number that should agree across platforms.\n"
-                "Frame rate is expected to differ by orders of magnitude; the\n"
-                "simulation rate should not, because the timestep is fixed.\n\n"
-                "Rows accumulate across runs, so capturing one platform at a\n"
-                "time builds the comparison up. Delete `capture/` to start\n"
-                "over.\n")
+        f.write(
+            "\nInterpret `sim_hz` by workload:\n\n"
+            "- **Game:** `sim_hz` should remain near `MR_GAME_TICK_HZ` (60 Hz)\n"
+            "  even when rendering FPS differs by orders of magnitude.\n"
+            "- **Stress:** `sim_hz` should track rendering FPS because the\n"
+            "  benchmark intentionally advances exactly once per rendered\n"
+            "  frame.\n\n"
+            "Rows accumulate across platforms. Re-capturing a platform\n"
+            "replaces that platform's complete case set so renamed or retired\n"
+            "cases cannot survive as stale report rows. Delete `capture/` to\n"
+            "start over.\n")
 
 
 def main(argv):

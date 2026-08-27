@@ -122,7 +122,10 @@ shift /1
 set "MR_FORWARD_ARGS="
 :collect_stress_args_loop
 if "%~1"=="" goto collect_stress_args_done
-set "MR_FORWARD_ARGS=!MR_FORWARD_ARGS! "%~1""
+rem Keep stress forwarding identical to the normal DOS path. DOS arguments do
+rem not contain spaces, and quoting "/shot=dos.bin" here can be re-tokenized by
+rem the batch/DOSBox command path as "/shot" "dos.bin".
+set "MR_FORWARD_ARGS=!MR_FORWARD_ARGS! %~1"
 shift /1
 goto collect_stress_args_loop
 :collect_stress_args_done

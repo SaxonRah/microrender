@@ -272,10 +272,14 @@ is not meaningful.
 Only the standard library is needed for Raylib capture, including PNG encoding.
 Pico capture needs `pyserial`.
 
-Rows accumulate across runs, keyed by platform and case, so capturing one
-platform at a time builds the comparison up rather than replacing it.
-Re-capturing a platform updates its row in place. Delete `capture\` to start
-over.
+Rows accumulate across platforms, so capturing one platform at a time builds
+the comparison up. Re-capturing a platform replaces that platform's complete
+current case set while preserving rows from other platforms. This prevents
+renamed or removed benchmark cases from surviving as stale results. Delete
+`capture\` to start over.
+
+The DOS matrix includes raw/tiled game rows and raw/tiled stress rows. That
+lets the same report verify both timing policies on the 16-bit frontend.
 
 Interpret `sim_hz` by demo. For game rows it should stay near
 `MR_GAME_TICK_HZ` even when `fps_avg` differs by orders of magnitude. For stress
