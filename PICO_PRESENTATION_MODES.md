@@ -103,16 +103,14 @@ scene-dependent and the preset uses 512 sprites with 16-row tiles.
 
 Two cautions before reading anything else in this document as a result.
 
-The simulation now runs on a fixed 60 Hz timestep driven by wall-clock time, so
-sprites move at the same speed at 110 FPS as at 55. Comparing presentation
-modes, a difference in motion speed is no longer available to be mistaken for a
-difference in smoothness.
+Stress is intentionally frame-coupled: one deterministic workload update runs
+for each rendered benchmark frame. The 1,024-sprite scene therefore moves about
+45% faster at 110 FPS than at 77. That is deliberate for this benchmark. It
+means frame N describes the same workload state on every target while each
+target remains free to process frames at its unrestricted maximum rate.
 
-Before that change the tick ran once per rendered frame, which made the
-1,024-sprite scene move about 45% faster at 110 FPS than at 77. Any measurement
-in this document taken before then reflects that; the frame timings are
-unaffected, since rasterization and transfer dominate and actor movement is a
-few percent of `cpuUs`.
+Do not generalize that policy to the game demo. The game uses a fixed 60 Hz
+wall-clock timestep so faster rendering does not make gameplay faster.
 
 Judged with that in mind, the visible difference between 77 and 110 FPS on this
 hardware is small: no difference in the background, and possibly a slight
@@ -137,19 +135,21 @@ It is a bus measurement, not a renderer measurement. `lace` exceeds 61 FPS only
 because it sends half the rows per presentation; its *complete-image* rate is
 about 38 Hz.
 
-Subtracting wire time from the measured `lace` frame time leaves roughly 5 ms of
-rasterization, so the renderer alone would sustain something near 200 FPS. On
-this hardware the renderer is not the limit and has not been for some time.
+The historical frame/transfer difference was roughly 5 ms, but that was a mixed
+CPU bucket rather than a pure renderer timer. Current firmware reports
+`updateUs` and `rasterUs` separately; remeasure those fields before quoting a
+Pico renderer-only rate. The transfer path was nevertheless already the visible
+bottleneck in these measurements.
 
 Two consequences worth keeping in mind before chasing a bigger number:
 
-- `lace` presents with the blocking `mr_pico_ili9341_flush`, so its ~5 ms of
-  rasterization and ~8 ms of transfer are strictly serial even though
-  `tile_buffer_b` is already allocated.
-- The panel scans its own GRAM at whatever `FRMCTR1` says, which this driver
-  never writes; the reset default is about 70 Hz. Above that, extra
-  presentations are overwritten before they are scanned out. The ILI9341 TE pin
-  is likewise unused, so nothing is synchronized to the panel scan.
+- single-core `lace` presents with the blocking `mr_pico_ili9341_flush`, so its
+  rasterization and transfer are serial; the default `stress-lace` preset is
+  different because `MR_PICO_PRESENT_CORE1=ON` overlaps them on core 0/core 1.
+- the panel reset default is about 70 Hz. The driver leaves that reset value
+  alone by default, but it can write `FRMCTR1` when a non-default sweep value is
+  configured. The ILI9341 TE pin is unused, so presentation is not synchronized
+  to panel scan-out.
 
 ### Measured on a Pimoroni Pico Plus 2 (RP2350)
 
@@ -163,10 +163,12 @@ All figures from `stress-lace` with `MR_PICO_PRESENT_CORE1=ON`, 1024 sprites,
 | 12bpp, half frame | 56.25 | 8871 | 112.6 | 51.9 Mb/s (69.3%) | scrambled |
 | 12bpp, full frame | 112.5 | 17477 | 57.1 | 52.7 Mb/s (70.3%) | clean |
 
-`cpuUs` sits at 5.0-5.4 ms in every one of these, so rasterization is about
-5.2 ms and would sustain roughly 190 FPS on its own. `flushUs` is core 0's
-*wait*, not the transfer time: the transfer spans the whole frame, overlapping
-the render and blocking core 0 for the remainder.
+Those historical rows predate split CPU timing. Current stress firmware reports
+`updateUs` and `rasterUs` separately; `cpuUs` is retained as the broader
+non-blocked bucket for compatibility. `rasterUs` times the actual shared scene
+draw callbacks, while `flushUs` is core 0's *wait*, not the transfer time: the
+transfer can span the whole frame and overlap rendering. Use
+`tests/mr_test_bench.c` when the question is renderer-only host throughput.
 
 Three things fall out of this, two of which contradict what the earlier drafts
 of this document claimed.

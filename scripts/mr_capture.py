@@ -59,12 +59,12 @@ RAYLIB_CASES = [
     ("game-tiled16", ["--demo", "game", "--mode", "tiled", "--tile", "16",
                       "--autoplay"]),
     ("game-raw", ["--demo", "game", "--mode", "raw", "--autoplay"]),
-    ("stress-visible-512", ["--demo", "stress", "--mode", "visible",
-                            "--sprites", "512"]),
+    ("stress-tiled-512", ["--demo", "stress", "--mode", "tiled",
+                          "--sprites", "512"]),
     ("stress-lace-1024", ["--demo", "stress", "--mode", "lace", "--sprites",
                           "1024", "--lace-block", "8"]),
-    ("stress-render-1024", ["--demo", "stress", "--mode", "render",
-                            "--sprites", "1024"]),
+    ("stress-dirtyrect-512", ["--demo", "stress", "--mode", "dirtyrect",
+                              "--sprites", "512"]),
 ]
 
 
@@ -138,8 +138,8 @@ def read_report(path):
 # platforms
 # --------------------------------------------------------------------------
 
-# 600 frames at 2,500 FPS is a quarter of a second, so startup dominates and
-# the simulation average comes out nearer 50 than 60. Long enough to measure.
+# Long enough that startup does not dominate the game fixed-timestep rate or
+# the stress throughput average.
 def capture_raylib(rows, frames=8000):
     exe = None
     for cand in ("microrender_raylib.exe", "microrender_raylib"):
@@ -161,10 +161,14 @@ def capture_raylib(rows, frames=8000):
                               "--shot", shot, "--report", rep]
         print("raylib: %s" % label)
         try:
-            subprocess.run(cmd, cwd=ROOT, timeout=120,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run = subprocess.run(cmd, cwd=ROOT, timeout=120,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             print("        timed out")
+            continue
+        if run.returncode != 0:
+            print("        frontend exited with code %d" % run.returncode)
             continue
         rows.append(finish("raylib", label, shot, read_report(rep)))
 
@@ -172,9 +176,7 @@ def capture_raylib(rows, frames=8000):
 # Metrics field -> the preset flag that determines it. Only fields the firmware
 # actually reports can be checked.
 PICO_EXPECT = {
-    "mode": ("MR_STRESS_MODE",
-             {"visible": "0", "raw": "1", "dirty": "2", "dirtyfixed": "3",
-              "render": "4", "lcdtest": "5", "lace": "6", "lacefixed": "7"}),
+    "mode_name": ("MR_STRESS_MODE", None),
     "spr": ("MR_STRESS_SPRITES", None),
     "spi": ("MR_LCD_SPI_BAUD", None),
     "lace": ("MR_STRESS_LACE_BLOCK_H", None),
@@ -216,7 +218,10 @@ def check_pico_config(fields, preset):
     problems = []
     for field, (flag, mapping) in PICO_EXPECT.items():
         if field not in fields:
-            # Firmware older than the core1/lace/phases metrics fields.
+            if field == "mode_name":
+                problems.append(
+                    "mode_name: firmware is too old; rebuild and flash it")
+            # Older firmware may omit other optional metrics.
             continue
         want = flags.get(flag)
         if want is None:

@@ -97,6 +97,10 @@ target_compile_definitions(microrender_raylib PRIVATE
     MR_RAYLIB_DEFAULT_LACE_BLOCK_H=${MR_RAYLIB_DEFAULT_LACE_BLOCK_H})
 
 if(MSVC)
+    # fopen is the portable API used by the host/DOS capture paths. C4996 is
+    # MSVC's vendor deprecation warning, so keep the portable call and silence
+    # that warning for this frontend.
+    target_compile_definitions(microrender_raylib PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(microrender_raylib PRIVATE /O2 /W4)
 else()
     target_compile_options(microrender_raylib PRIVATE -O3 -Wall -Wextra -Wpedantic)

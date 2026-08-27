@@ -4,12 +4,14 @@
 /*
  * Fixed-timestep accumulator.
  *
- * Both demos advance their simulation once per rendered frame, which ties game
- * speed to how fast the hardware draws. That spread is not small: the same
- * game demo runs near 15 FPS on a real 386, 60 on a Pico 2, 140 under DOSBox
- * at high cycles, and several thousand on an uncapped Raylib window. The game
- * is literally a hundred times faster on one target than another, and a faster
- * board makes it worse rather than better.
+ * The shared game must not advance once per rendered frame, because that ties
+ * game speed to how fast the hardware draws. That spread is not small: the
+ * game demo can render near 15 FPS on a real 386, around 60 on a Pico 2, above
+ * 100 under DOSBox, and several thousand on an uncapped Raylib window.
+ *
+ * The stress benchmark deliberately does NOT use this accumulator. It advances
+ * one deterministic workload step per rendered benchmark frame so each target
+ * is free to run the benchmark as fast as it can.
  *
  * The fix is not to scale movement by delta time -- that makes every result
  * depend on timing jitter and destroys the byte-for-byte reproducibility the

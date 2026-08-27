@@ -188,7 +188,6 @@ if /i "%~1"=="vscode" (
     if /i "!MR_KEY!"=="presentation" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_GAME_PRESENTATION=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
     if /i "!MR_KEY!"=="hud" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_HUD_MODE=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
     if /i "!MR_KEY!"=="lace" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_LACE_BLOCK_H=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
-    if /i "!MR_KEY!"=="target" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_TARGET_FPS=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
     if /i "!MR_KEY!"=="serial" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_SERIAL=!MR_VALUE! -DMR_PICO_GAME_SERIAL=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
     if /i "!MR_KEY!"=="diag" (set "EXTRA_FLAGS=!EXTRA_FLAGS! -DMR_STRESS_PICO_DIAG=!MR_VALUE!"& set "MR_OPT_HANDLED=1")
     if "!MR_OPT_HANDLED!"=="0" (

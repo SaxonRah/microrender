@@ -71,7 +71,7 @@
     {
       "name": "stress-render",
       "inherits": "stress-visible",
-      "displayName": "Pico 2: renderer-only, serial FPS reporting",
+      "displayName": "Pico 2: stress raster path, LCD flush disabled",
       "binaryDir": "${sourceDir}/build-stress-render",
       "cacheVariables": {
         "MR_STRESS_MODE": "render",

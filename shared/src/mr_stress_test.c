@@ -426,7 +426,6 @@ void mr_stress_config_defaults(mr_stress_config_t GFX_PTR *cfg, int screen_w,
   cfg->screen_w = screen_w;
   cfg->screen_h = screen_h;
   cfg->sprite_count = MR_STRESS_DEFAULT_SPRITES;
-  cfg->target_fps = 120;
   cfg->features = MR_STRESS_FEATURE_DEFAULT;
   cfg->stats_sample_rate = 8;
 }
@@ -464,8 +463,6 @@ void mr_stress_init(mr_stress_test_t GFX_PTR *st,
     local_cfg.sprite_count = MR_STRESS_DEFAULT_SPRITES;
   if (local_cfg.sprite_count > MR_STRESS_MAX_SPRITES)
     local_cfg.sprite_count = MR_STRESS_MAX_SPRITES;
-  if (local_cfg.target_fps <= 0)
-    local_cfg.target_fps = 120;
   if (local_cfg.features == 0)
     local_cfg.features = MR_STRESS_FEATURE_DEFAULT;
 #if !MR_STRESS_ENABLE_TRIANGLES
@@ -809,8 +806,11 @@ void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st) {
   int i;
   int hud_h;
   int play_h;
+#if !MR_STRESS_FAST_METRICS
   int sample_stats;
   gfx_blit_stats_t stats;
+  gfx_blit_stats_t GFX_PTR *stats_ptr;
+#endif
 
   if (!r || !st)
     return;
@@ -837,8 +837,9 @@ void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st) {
 
   mr_stress_prepare_buckets(st, r->tile_h, hud_h);
 
-  sample_stats = 0;
 #if !MR_STRESS_FAST_METRICS
+  sample_stats = 0;
+  stats_ptr = 0;
   if ((st->cfg.features & MR_STRESS_FEATURE_STATS) != 0) {
     if (st->cfg.stats_sample_rate <= 1)
       sample_stats = 1;
@@ -849,6 +850,7 @@ void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st) {
 
   if (sample_stats) {
     memset(&stats, 0, sizeof(stats));
+    stats_ptr = &stats;
     st->metrics.rle_runs_drawn = 0ul;
     st->metrics.rle_pixels_copied = 0ul;
     st->metrics.stats_sampled++;
@@ -877,9 +879,12 @@ void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st) {
       actor_index = (int)st->bucket_actor[i];
       sx = st->actor_screen_x[actor_index];
       sy = st->actor_screen_y[actor_index];
-      if (sample_stats)
-        gfx_blit_counted(r, &st->sprite, sx, sy, &stats);
-      else {
+#if !MR_STRESS_FAST_METRICS
+      if (stats_ptr)
+        gfx_blit_counted(r, &st->sprite, sx, sy, stats_ptr);
+      else
+#endif
+      {
         gfx_blit(r, &st->sprite, sx, sy);
 #if !MR_STRESS_FAST_METRICS
         st->metrics.sprites_drawn++;
@@ -888,12 +893,14 @@ void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st) {
     }
   }
 
-  if (sample_stats) {
-    st->metrics.sprites_drawn += stats.sprites_drawn;
-    st->metrics.sprites_rejected += stats.sprites_rejected;
-    st->metrics.rle_runs_drawn += stats.rle_runs_drawn;
-    st->metrics.rle_pixels_copied += stats.rle_pixels_copied;
+#if !MR_STRESS_FAST_METRICS
+  if (stats_ptr) {
+    st->metrics.sprites_drawn += stats_ptr->sprites_drawn;
+    st->metrics.sprites_rejected += stats_ptr->sprites_rejected;
+    st->metrics.rle_runs_drawn += stats_ptr->rle_runs_drawn;
+    st->metrics.rle_pixels_copied += stats_ptr->rle_pixels_copied;
   }
+#endif
 
   if ((st->cfg.features & MR_STRESS_FEATURE_HUD) != 0)
     mr_stress_draw_hud(r, st);

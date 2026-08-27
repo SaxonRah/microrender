@@ -59,44 +59,6 @@ set(MR_BENCH_FRAMES 200 CACHE STRING
     "Frames per configuration for the benchmark")
 
 # ---------------------------------------------------------------------------
-# the shared renderer core, compiled for the host
-# ---------------------------------------------------------------------------
-
-add_library(microrender_core STATIC
-    "${MR_SHARED_SRC}/gfx.c"
-    "${MR_SHARED_SRC}/gfx_engine.c"
-    "${MR_SHARED_SRC}/gfx_font5x7.c"
-    "${MR_SHARED_SRC}/gfx_triangle.c"
-    "${MR_SHARED_SRC}/gfx_rgb444.c"
-    "${MR_SHARED_SRC}/mr_timestep.c"
-    "${MR_SHARED_SRC}/mr_strbuf.c"
-    "${MR_SHARED_SRC}/mr_game_demo.c"
-)
-
-target_include_directories(microrender_core PUBLIC "${MR_SHARED_SRC}")
-
-if(MR_TESTS_INDEX8)
-    target_compile_definitions(microrender_core PUBLIC GFX_COLOR_INDEX8=1)
-endif()
-
-# The core is expected to build silently under this set. It currently does; if
-# a change breaks that, CI should say so loudly rather than accumulate noise.
-if(MSVC)
-    target_compile_options(microrender_core PRIVATE /W4)
-    if(MR_TESTS_WERROR)
-        target_compile_options(microrender_core PRIVATE /WX)
-    endif()
-else()
-    target_compile_options(microrender_core PRIVATE
-        -Wall -Wextra -Wpedantic -Wshadow -Wconversion
-        -Wstrict-prototypes -Wmissing-prototypes -Wcast-qual -Wundef
-    )
-    if(MR_TESTS_WERROR)
-        target_compile_options(microrender_core PRIVATE -Werror)
-    endif()
-endif()
-
-# ---------------------------------------------------------------------------
 # sanitizers
 # ---------------------------------------------------------------------------
 
@@ -120,6 +82,69 @@ if(MR_TESTS_SANITIZE)
 endif()
 
 # ---------------------------------------------------------------------------
+# renderer, optional helpers, and demo support
+# ---------------------------------------------------------------------------
+
+add_library(microrender_gfx STATIC
+    "${MR_SHARED_SRC}/gfx.c"
+    "${MR_SHARED_SRC}/gfx_font5x7.c"
+    "${MR_SHARED_SRC}/gfx_triangle.c"
+    "${MR_SHARED_SRC}/gfx_rgb444.c")
+
+# The benchmark gets a separately compiled renderer so it stays genuinely
+# unsanitized even when the correctness libraries below are instrumented.
+add_library(microrender_gfx_bench STATIC
+    "${MR_SHARED_SRC}/gfx.c"
+    "${MR_SHARED_SRC}/gfx_font5x7.c"
+    "${MR_SHARED_SRC}/gfx_triangle.c"
+    "${MR_SHARED_SRC}/gfx_rgb444.c")
+target_include_directories(microrender_gfx_bench PUBLIC "${MR_SHARED_SRC}")
+# Optimisation comes from the dedicated Release "bench" preset. Do not force
+# /O2 or -O2 here: ordinary "build tests" is intentionally a Debug build, and
+# MSVC's /RTC1 cannot be combined with /O2.
+
+add_library(microrender_engine STATIC
+    "${MR_SHARED_SRC}/gfx_engine.c")
+target_link_libraries(microrender_engine PUBLIC microrender_gfx)
+
+add_library(microrender_demo_support STATIC
+    "${MR_SHARED_SRC}/mr_timestep.c"
+    "${MR_SHARED_SRC}/mr_strbuf.c"
+    "${MR_SHARED_SRC}/mr_game_demo.c")
+target_link_libraries(microrender_demo_support PUBLIC microrender_engine)
+
+foreach(target microrender_gfx microrender_engine microrender_demo_support)
+    target_include_directories(${target} PUBLIC "${MR_SHARED_SRC}")
+    # Compile the libraries themselves with sanitizers, not only the final test
+    # executables. Otherwise memory/UB instrumentation misses the code under
+    # test and the CI job name overstates its coverage.
+    target_link_libraries(${target} PRIVATE mr_sanitizers)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+        if(MR_TESTS_WERROR)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion
+            -Wstrict-prototypes -Wmissing-prototypes -Wcast-qual -Wundef)
+        if(MR_TESTS_WERROR)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+endforeach()
+
+if(MR_TESTS_INDEX8)
+    target_compile_definitions(microrender_gfx PUBLIC GFX_COLOR_INDEX8=1)
+    target_compile_definitions(microrender_gfx_bench PUBLIC GFX_COLOR_INDEX8=1)
+endif()
+
+# Compatibility umbrella for test code that wants all optional shared helpers.
+# The important difference is that microrender_gfx now exists independently.
+add_library(microrender_core INTERFACE)
+target_link_libraries(microrender_core INTERFACE microrender_demo_support)
+
+# ---------------------------------------------------------------------------
 # test binaries
 # ---------------------------------------------------------------------------
 
@@ -140,7 +165,7 @@ mr_add_test_binary(mr_test_game  mr_test_game.c)
 # never linked against sanitizers, whatever the build type is.
 add_executable(mr_test_bench mr_test_bench.c)
 target_include_directories(mr_test_bench PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
-target_link_libraries(mr_test_bench PRIVATE microrender_core)
+target_link_libraries(mr_test_bench PRIVATE microrender_gfx_bench)
 if(NOT MSVC)
     target_compile_options(mr_test_bench PRIVATE -O2 -Wall -Wextra)
 endif()

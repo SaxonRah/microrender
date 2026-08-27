@@ -2,7 +2,7 @@
 
 ## A beginner-friendly tour of the entire project
 
-**Source basis:** the current MicroRender project tree used in this development workstream, anchored at commit `66cd60fcec6bc66d427055af2b9fe0198a308c17` and including the subsequent build, Raylib, RGB565, game-behavior, and universal Pico screenshot work.
+**Source basis:** audited against the repository state beginning at `c1c396a4232b824213dd65601bb43e709263105f`, with this document kept in step with the timing and renderer/library separation described below.
 
 This guide assumes the reader has never written a renderer, never programmed a Raspberry Pi Pico, and may not know what words such as *framebuffer*, *sprite*, *DMA*, *RLE*, or *CMake* mean.
 
@@ -70,17 +70,24 @@ A Pico 2 can afford a buffer of that size in some modes. A 16-bit DOS program ha
 
 ## 2. A frame
 
-A **frame** is one complete image shown by the game.
+A **render frame** is one complete image the program attempts to draw and
+present. It is not the same thing as one game update.
 
-A game repeatedly does this:
+There are three rates worth keeping separate:
 
-1. Read the player’s controls.
-2. Update the game world.
-3. Draw a new image.
-4. Show that image.
-5. Repeat.
+- a **simulation tick** changes game state,
+- a **render frame** draws the current state,
+- a **display refresh** is when the physical monitor or LCD scans an image out.
 
-If this happens 60 times per second, the game is running at about 60 frames per second, or 60 FPS.
+MicroRender deliberately does not require those rates to match. The shared game
+uses a deterministic fixed 60 Hz simulation while rendering is allowed to run
+as fast as the platform can manage. On a very fast desktop, several render
+frames may show the same simulation state. On a slow machine, one render frame
+may follow several fixed simulation updates.
+
+The stress benchmark has a different contract: it deliberately advances one
+workload step per rendered frame. Stress time is benchmark iteration count, not
+game-world wall-clock time, so a faster target is allowed to advance it faster.
 
 ## 3. A renderer
 
@@ -188,9 +195,10 @@ This overlap is called **pipelining**. It reduces the time during which the CPU 
 
 ---
 
-# Part 3: what happens during one game frame
+# Part 3: what happens during one game-loop iteration
 
-Here is the full journey before we look at individual files.
+Here is the full journey before we look at individual files. A loop iteration
+always renders, but it does not necessarily contain exactly one simulation tick.
 
 ## Step 1: platform input becomes common input
 
@@ -208,9 +216,19 @@ up, down, left, right, action, start, pause, debug, quit
 
 The shared game never needs to know how a DOS interrupt or a Raylib keyboard function works.
 
-## Step 2: the game updates
+## Step 2: the fixed game simulation advances when due
 
-`mr_game_demo_tick()` receives that common input.
+The frontend gives its wall-clock timestamp to `mr_timestep_advance()`. At high
+render rates it often returns zero. At low render rates it can return several
+fixed steps, with a cap so a long stall is not paid back as a burst of fast
+gameplay.
+
+Held movement input can be reused across those fixed steps. Press-only actions
+such as pause, debug, start, and action are buffered across zero-step render
+frames and consumed by only the first simulation step, so a high frame rate
+cannot lose a press and a catch-up frame cannot toggle something twice.
+
+For each due step, `mr_game_demo_tick()` receives the common input.
 
 It then performs the game-side work:
 
@@ -268,9 +286,10 @@ When the strip is complete, the renderer calls the platform’s flush function.
 
 The renderer repeats until the entire requested frame or dirty region has been processed.
 
-## Step 7: repeat for the next frame
+## Step 7: repeat the frontend loop
 
-The main loop goes back to input and simulation.
+The main loop goes back to input, asks the fixed-timestep accumulator whether
+game simulation is due, and renders the current state again.
 
 That loop is the heartbeat of the program.
 
@@ -301,7 +320,11 @@ microrender/
 
 The key design rule is:
 
-> **If a feature is part of drawing or game behavior, it belongs in `shared`. If it is only about one machine’s screen, keyboard, window, or toolchain, it belongs in that platform’s frontend.**
+> **Portable rendering belongs in the renderer core. Optional portable scene
+> helpers may sit above it. Game/demo/stress policy sits above those. A
+> machine-specific screen, keyboard, timer, window, or toolchain belongs in its
+> frontend. Nothing in the renderer core depends upward on the optional
+> layers.**
 
 ---
 

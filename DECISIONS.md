@@ -196,7 +196,7 @@ is headroom.
 
 ---
 
-## 7. Simulation tied to frame rate — FIXED
+## 7. Game simulation tied to frame rate — FIXED; stress stays frame-coupled
 
 **Observation.** Both demos advanced one simulation step per rendered frame.
 
@@ -214,44 +214,31 @@ Raylib is the worst case and it is the default: `MR_RAYLIB_DEFAULT_FPS` is 0 and
 byte-for-byte reproducibility the fuzz and game tests rely on would be gone.
 Those tests are what caught two regressions during this work.
 
-**What was done instead.** Fixed timestep with an accumulator. The step stays
-identical and deterministic; wall-clock time only decides how many steps run.
-`tick()` is untouched, so tests call it directly and determinism is preserved
-exactly.
+**Game policy.** The shared game uses a fixed timestep with an accumulator.
+The step stays identical and deterministic; wall-clock time only decides how
+many 60 Hz steps run. Rendering remains uncapped. Tests can still call
+`mr_game_demo_tick()` directly and remain byte-for-byte deterministic.
 
-**This also removed a measurement trap.** Before the fix, sprites moved about
-45% faster at 110 FPS than at 77, so comparing presentation modes side by side
-the faster one *looked* smoother largely because the simulation was running
-quicker. That is a property of the benchmark, and easy to credit to the
-renderer.
+**Stress policy.** The stress test is not game time. It is a deterministic
+workload generator, so it intentionally advances exactly one `mr_stress_tick()`
+per rendered benchmark frame. Frame N therefore means the same workload state
+on DOS, Pico and Raylib, while a faster platform is free to process more of
+those frames per second. `sim_hz` for stress is expected to track FPS.
 
-**Measured afterwards**, same scene and shared source on all three targets,
-captured with `mr_capture.py all`:
+This distinction also keeps the renderer itself policy-free: it owns no clock
+and no frame cap. Game code decides how often the world changes; the benchmark
+decides that one frame is one workload iteration.
 
-| platform | case | fps_avg | sim_hz |
-| --- | --- | ---: | ---: |
-| raylib | game-tiled16 | 4237.52 | 59.33 |
-| raylib | game-raw | 4504.68 | 59.12 |
-| raylib | stress-visible-512 | 4283.56 | 59.43 |
-| raylib | stress-lace-1024 | 4363.33 | 59.45 |
-| raylib | stress-render-1024 | 4308.30 | 59.24 |
-| dos | game-tiled | 131.41 | 59.14 |
-| dos | game-raw | 53.12 | 59.54 |
-| pico | stress-lace | 110.65 | 59.90 |
-
-Frame rate spans a factor of 85. Simulation rate spans 0.8%. That is the whole
-claim, and it is now reproducible rather than argued.
-
-Two side notes from the same table. DOS tiled against DOS raw is 131 versus 53
-FPS on identical hardware and scene, which is the cost of staging a whole frame
-before presenting it rather than sending strips as they are drawn. And the
-Raylib rows are all around 4,300 FPS regardless of mode, because at that rate
-the frontend is bound by window presentation rather than by anything this
-renderer does.
+**Capture correction.** An earlier cross-platform table should not be used as
+evidence for Raylib stress modes. The capture harness passed `visible` and
+`render` to a Raylib parser that only accepted `raw`, `tiled`, `lace`, and
+`dirtyrect`; unknown names silently became `tiled`. The harness now uses only
+real Raylib modes and the frontend rejects unknown mode names instead of
+silently changing the experiment.
 
 **Two bugs it introduced, both found on hardware.**
 
-*Autoplay turned circles.* The scripted input was indexed by frame counter, so
+*Autoplay turned circles.* The scripted game input was indexed by frame counter, so
 once simulation stopped advancing once per frame it cycled at the redraw rate —
 thousands of direction changes per second on an uncapped window. Now indexed by
 simulation tick.
@@ -308,9 +295,12 @@ necessarily there during recovery — which is exactly the cold-versus-warm spli
 that was observed and that four firmware theories failed to explain.
 
 **Fix.** Initialise at 8 MHz, restore `MR_LCD_SPI_BAUD` before the first frame.
-The init sequence is a few dozen bytes, so compliance costs nothing measurable
-and every frame still goes out at 75 MHz. USB, SWD and manual flashing all work
-afterwards.
+The init sequence is a few dozen bytes, so keeping *initialisation* within the
+published serial timing costs nothing measurable. Normal pixel/window traffic
+still returns to the empirically stable 75 MHz used by this tested module; that
+steady-state rate is intentionally above the controller's published serial
+timing and should be treated as a measured module-specific overclock, not a
+datasheet guarantee. USB, SWD and manual flashing all work afterwards.
 
 **The lesson is about where to look.** Every wrong answer was a theory about
 *state* — what the previous image left behind. The right answer was about

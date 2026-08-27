@@ -9,7 +9,6 @@
 #include "gfx.h"
 #include "mr_stress_test.h"
 #include "dos_vga.h"
-#include "mr_timestep.h"
 
 #define DOS_SCREEN_W 320
 #define DOS_SCREEN_H 240
@@ -25,7 +24,6 @@
 #endif
 #define DOS_FRAME_PIXELS ((long)DOS_SCREEN_W * (long)DOS_SCREEN_H)
 
-static mr_timestep_t dos_step;
 
 static gfx_renderer_t dos_renderer;
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
@@ -70,7 +68,7 @@ static void print_usage(void) {
   printf("Usage: mstress [/sprites N] [/frames N] [/novsync] [/noflush] "
          "[/nohud]\n");
   printf("               [/notri] [/nostats] [/fullstats] [/statsrate N]\n");
-  printf("               [/notile] [/nocollide] [/target N]\n");
+  printf("               [/notile] [/nocollide]\n");
   printf("Examples:\n");
   printf("  mstress /sprites 512 /frames 2100 /novsync\n");
   printf("  mstress /sprites 1024 /frames 2100 /novsync\n");
@@ -97,7 +95,6 @@ int main(int argc, char **argv) {
 
   mr_stress_config_defaults(&cfg, DOS_SCREEN_W, DOS_SCREEN_H);
   cfg.sprite_count = 512;
-  cfg.target_fps = 120;
   cfg.stats_sample_rate = 8;
 
   for (i = 1; i < argc; ++i) {
@@ -111,9 +108,6 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "/frames") == 0 ||
                strcmp(argv[i], "-frames") == 0) {
       frame_limit = parse_int_arg(argc, argv, &i, frame_limit);
-    } else if (strcmp(argv[i], "/target") == 0 ||
-               strcmp(argv[i], "-target") == 0) {
-      cfg.target_fps = parse_int_arg(argc, argv, &i, cfg.target_fps);
     } else if (strcmp(argv[i], "/novsync") == 0 ||
                strcmp(argv[i], "-novsync") == 0) {
       no_vsync = 1;
@@ -156,12 +150,11 @@ int main(int argc, char **argv) {
   if (cfg.stats_sample_rate <= 0)
     cfg.stats_sample_rate = 8;
 
-  printf("MicroRender 320x240 RGB565 Mode X stress: mode=%s sprites=%d frames=%d vsync=%s flush=%s target=%d "
+  printf("MicroRender 320x240 RGB565 Mode X stress: mode=%s sprites=%d frames=%d vsync=%s flush=%s "
          "statsrate=%d\n",
          MR_DOS_PRESENT_MODE == 0 ? "raw" : "tiled", cfg.sprite_count,
          frame_limit, no_vsync ? "off" : "on",
-         dos_vga_flush_enabled() ? "on" : "off", cfg.target_fps,
-         cfg.stats_sample_rate);
+         dos_vga_flush_enabled() ? "on" : "off", cfg.stats_sample_rate);
   printf("Press ESC during the run to stop early.\n");
 
 #if MR_DOS_PRESENT_MODE == 0
@@ -180,7 +173,6 @@ int main(int argc, char **argv) {
   mr_stress_init(&stress, &cfg);
 
   dos_vga_enter();
-  mr_timestep_init(&dos_step, 60, 5);
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
   fps_frame = 0;
@@ -193,11 +185,7 @@ int main(int argc, char **argv) {
     int saved_flush;
     saved_flush = dos_vga_flush_enabled();
     dos_vga_set_flush_enabled(1);
-    {
-      int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
-      while (steps-- > 0)
-        mr_stress_tick(&stress);
-    }
+    mr_stress_tick(&stress);
 #if MR_DOS_PRESENT_MODE == 0
     gfx_render_tiled(&dos_renderer, draw_stress_scene, &stress, GFX_RGB565_BLACK);
     dos_vga_present_rgb565_frame(dos_raw_frame);
@@ -223,11 +211,9 @@ int main(int argc, char **argv) {
         break;
     }
 
-    {
-      int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
-      while (steps-- > 0)
-        mr_stress_tick(&stress);
-    }
+    /* Stress is a frame-coupled workload by design: one deterministic update
+       for each frame the target manages to render. */
+    mr_stress_tick(&stress);
 #if MR_DOS_PRESENT_MODE == 0
     /* Raw reference: clear/draw every logical pixel, then upload the whole
        completed frame. No tile is presented while rasterization is active. */

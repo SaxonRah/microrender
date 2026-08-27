@@ -101,6 +101,25 @@ jobs:
           --no-tests=error
           -R '^fuzz_'
 
+  renderer-standalone:
+    name: standalone renderer / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure renderer only
+        run: >
+          cmake -S shared -B build-renderer
+          -DCMAKE_BUILD_TYPE=Release
+          -DMR_BUILD_ENGINE_HELPERS=OFF
+      - name: Build renderer only
+        run: cmake --build build-renderer --target microrender_gfx --parallel
+
   raylib-headless:
     name: Raylib frontend / headless API check
     runs-on: ubuntu-24.04

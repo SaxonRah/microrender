@@ -128,7 +128,7 @@ void mr_pico_demo_main(void) {
   last_fps_ms = start_fps_ms;
   mr_game_demo_set_fps10(&game_demo, 0ul, 0ul);
 
-  mr_timestep_init(&demo_step, 60, 5);
+  mr_timestep_init(&demo_step, MR_GAME_TICK_HZ, 5);
 
 
   for (;;) {

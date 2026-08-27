@@ -9,7 +9,6 @@
 #endif
 #include "mr_strbuf.h"
 #include "gfx.h"
-#include "mr_timestep.h"
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pll.h"
@@ -43,10 +42,6 @@
 #define MR_STRESS_SPRITES 512
 #endif
 
-#ifndef MR_STRESS_TARGET_FPS
-#define MR_STRESS_TARGET_FPS 120
-#endif
-
 /*
  * 0 = visible/full: render every frame and flush every tile band to LCD.
  * 1 = render-only: show one proof frame, then render with null flush;
@@ -70,6 +65,42 @@
 #ifndef MR_STRESS_PICO_FLUSH_MODE
 #define MR_STRESS_PICO_FLUSH_MODE 0
 #endif
+
+static const char *stress_mode_name(void) {
+#if MR_STRESS_PICO_FLUSH_MODE == 0
+  return "visible";
+#elif MR_STRESS_PICO_FLUSH_MODE == 1
+#if MR_STRESS_FIXED_CAMERA
+  return "fixedrender";
+#else
+  return "render";
+#endif
+#elif MR_STRESS_PICO_FLUSH_MODE == 2
+  return "everyN";
+#elif MR_STRESS_PICO_FLUSH_MODE == 3
+#if MR_STRESS_FIXED_CAMERA
+  return "dirtyfixed";
+#else
+  return "dirty";
+#endif
+#elif MR_STRESS_PICO_FLUSH_MODE == 4
+  return "lcdtest";
+#elif MR_STRESS_PICO_FLUSH_MODE == 5
+#if MR_STRESS_FIXED_CAMERA
+  return "dirtyrectfixed";
+#else
+  return "dirtyrect";
+#endif
+#elif MR_STRESS_PICO_FLUSH_MODE == 6
+#if MR_STRESS_FIXED_CAMERA
+  return "lacefixed";
+#else
+  return "lace";
+#endif
+#else
+  return "raw";
+#endif
+}
 
 #ifndef MR_STRESS_PICO_LCD_EVERY
 #define MR_STRESS_PICO_LCD_EVERY 4
@@ -223,7 +254,6 @@ static void lace_present_sync(void);
 static void lace_core1_main(void);
 #endif
 
-static mr_timestep_t stress_step;
 static unsigned long stress_sim_ticks;
 static gfx_color_t tile_buffer_a[MR_SCREEN_W * MR_TILE_H];
 #if MR_LACE_CORE1 ||                                                           \
@@ -285,6 +315,9 @@ static unsigned long stress_dirty_sent_pixels;
 static unsigned long stress_dirty_spans;
 static uint32_t stress_flush_us_accum;
 static uint32_t stress_frame_us_accum;
+static uint32_t stress_update_us_accum;
+static uint32_t stress_raster_us_accum;
+static int stress_measure_draw;
 static unsigned long stress_stat_window_frames;
 static uint32_t stress_full_flush_begin_us;
 static unsigned long stress_diag_fps10;
@@ -400,8 +433,14 @@ static void stress_draw_pico_diag(gfx_renderer_t *r) {
 }
 
 static void draw_stress_scene(gfx_renderer_t *r, void *user) {
+  uint32_t t0;
+  t0 = 0u;
+  if (stress_measure_draw)
+    t0 = time_us_32();
   mr_stress_render(r, (mr_stress_test_t *)user);
   stress_draw_pico_diag(r);
+  if (stress_measure_draw)
+    stress_raster_us_accum += (uint32_t)(time_us_32() - t0);
 }
 
 static void screenshot_wait_for_display(void *user) {
@@ -809,12 +848,16 @@ static void stress_flush_wait(gfx_renderer_t *r, void *user) {
 static void stress_reset_timing(void) {
   frame_counter = 0;
   last_fps_frame = 0;
+  stress_sim_ticks = 0ul;
   stress_flush_bytes = 0ul;
   stress_dirty_pixels = 0ul;
   stress_dirty_sent_pixels = 0ul;
   stress_dirty_spans = 0ul;
   stress_flush_us_accum = 0u;
   stress_frame_us_accum = 0u;
+  stress_update_us_accum = 0u;
+  stress_raster_us_accum = 0u;
+  stress_measure_draw = 0;
   stress_stat_window_frames = 0ul;
   stress_diag_fps10 = 0ul;
   stress_diag_avg_fps10 = 0ul;
@@ -1025,7 +1068,6 @@ static void stress_lcdtest_loop(void) {
                           draw_lcdtest_scene, 0, screenshot_wait_for_display,
                           0);
 
-  mr_timestep_init(&stress_step, 60, 5);
   stress_reset_timing();
   for (;;) {
     uint32_t frame_t0;
@@ -1234,11 +1276,11 @@ void mr_pico_stress_demo_main(void) {
                 (unsigned)MR_LCD_PIN_SCK, (unsigned)MR_LCD_PIN_MOSI,
                 (unsigned)MR_LCD_PIN_RST, (unsigned)MR_LCD_PIN_DC);
   stress_printf(
-      "screen: %dx%d view_h=%d tile_h=%d sprites=%d target=%d flush_mode=%d "
+      "screen: %dx%d view_h=%d tile_h=%d sprites=%d mode=%s flush_mode=%d "
       "every=%d statsrate=%d fixedcam=%d tris=%d mergegap=%d serial=%d "
       "peri_from_sys=%d peri_pll_khz=%u diag=%d framepipe=%d\n",
       MR_SCREEN_W, MR_SCREEN_H, MR_VIEW_H, MR_TILE_H, MR_STRESS_SPRITES,
-      MR_STRESS_TARGET_FPS, MR_STRESS_PICO_FLUSH_MODE, MR_STRESS_PICO_LCD_EVERY,
+      stress_mode_name(), MR_STRESS_PICO_FLUSH_MODE, MR_STRESS_PICO_LCD_EVERY,
       MR_STRESS_STATS_RATE, MR_STRESS_FIXED_CAMERA, MR_STRESS_ENABLE_TRIANGLES,
       MR_STRESS_PICO_DIRTY_MERGE_GAP, MR_STRESS_PICO_SERIAL,
       MR_PICO_PERI_FROM_SYS, (unsigned)MR_PICO_PERI_PLL_KHZ,
@@ -1267,7 +1309,6 @@ void mr_pico_stress_demo_main(void) {
 
   mr_stress_config_defaults(&cfg, MR_SCREEN_W, MR_VIEW_H);
   cfg.sprite_count = MR_STRESS_SPRITES;
-  cfg.target_fps = MR_STRESS_TARGET_FPS;
   cfg.stats_sample_rate = MR_STRESS_STATS_RATE;
   cfg.features = MR_STRESS_FEATURE_DEFAULT;
 #if !MR_STRESS_ENABLE_TRIANGLES
@@ -1288,11 +1329,6 @@ void mr_pico_stress_demo_main(void) {
   multicore_launch_core1(lace_core1_main);
 #endif
 
-  /* Must be initialised on this path too, not only in the lcdtest loop. An
-     unset accumulator has step_us = 0 and max_steps = 0, so advance() returns
-     zero forever: the renderer keeps drawing at full speed while the scene
-     never changes. That looks exactly like a hang. */
-  mr_timestep_init(&stress_step, 60, 5);
   stress_reset_timing();
 
 #if MR_STRESS_PICO_FLUSH_MODE == 1
@@ -1303,14 +1339,8 @@ void mr_pico_stress_demo_main(void) {
    */
   stress_present_this_frame = 1;
   stress_dirty_this_frame = 0;
-  {
-    int steps = mr_timestep_advance(&stress_step,
-                                    (unsigned long)stress_time_us());
-    while (steps-- > 0) {
-      mr_stress_tick(&stress);
-      ++stress_sim_ticks;
-    }
-  }
+  mr_stress_tick(&stress);
+  ++stress_sim_ticks;
   gfx_render_tiled_pipelined(&renderer, tile_buffer_b, draw_stress_scene,
                              &stress, GFX_RGB565_BLACK, 0u);
   stress_printf("render-only proof frame shown; switching to null LCD flush, "
@@ -1348,13 +1378,12 @@ void mr_pico_stress_demo_main(void) {
     stress_dirtyrect_src = 0;
 #endif
     {
-      int steps = mr_timestep_advance(&stress_step,
-                                      (unsigned long)stress_time_us());
-      while (steps-- > 0) {
-        mr_stress_tick(&stress);
-        ++stress_sim_ticks;
-      }
+      uint32_t update_t0 = stress_time_us();
+      mr_stress_tick(&stress);
+      stress_update_us_accum += (uint32_t)(stress_time_us() - update_t0);
     }
+    ++stress_sim_ticks;
+    stress_measure_draw = 1;
 #if MR_STRESS_PICO_FLUSH_MODE == 7
     /* Deliberately unoptimized reference path: render, synchronously flush,
        then loop. No DMA/raster overlap. */
@@ -1378,6 +1407,7 @@ void mr_pico_stress_demo_main(void) {
     if (stress_present_this_frame && stress_dirty_this_frame)
       stress_dirtyrect_present(&renderer, &lcd);
 #endif
+    stress_measure_draw = 0;
     stress_frame_us_accum += (uint32_t)(stress_time_us() - frame_t0);
     ++stress_stat_window_frames;
     ++frame_counter;
@@ -1390,6 +1420,8 @@ void mr_pico_stress_demo_main(void) {
       unsigned long avg_fps10;
       unsigned long frame_us;
       unsigned long flush_us;
+      unsigned long update_us;
+      unsigned long raster_us;
       unsigned long cpu_us;
       unsigned long dirty_pct10;
       uint32_t delta_ms;
@@ -1402,9 +1434,8 @@ void mr_pico_stress_demo_main(void) {
       fps10 = delta_ms ? (frames * 10000ul) / (unsigned long)delta_ms : 0ul;
       avg_fps10 =
           total_ms ? (frame_counter * 10000ul) / (unsigned long)total_ms : 0ul;
-      /* Simulation rate, computed exactly like the frame rate so the two are
-         directly comparable. This is the number that should agree across DOS,
-         Raylib and Pico; the frame rate is expected not to. */
+      /* Stress is intentionally frame-coupled, so this is expected to track
+         fps rather than agree across platforms. */
       sim_hz10 = total_ms
                      ? (stress_sim_ticks * 10000ul) / (unsigned long)total_ms
                      : 0ul;
@@ -1418,6 +1449,14 @@ void mr_pico_stress_demo_main(void) {
                      ? (unsigned long)(stress_flush_us_accum /
                                        (uint32_t)stress_stat_window_frames)
                      : 0ul;
+      update_us = stress_stat_window_frames
+                      ? (unsigned long)(stress_update_us_accum /
+                                        (uint32_t)stress_stat_window_frames)
+                      : 0ul;
+      raster_us = stress_stat_window_frames
+                      ? (unsigned long)(stress_raster_us_accum /
+                                        (uint32_t)stress_stat_window_frames)
+                      : 0ul;
       cpu_us = (frame_us > flush_us) ? (frame_us - flush_us) : 0ul;
       dirty_pct10 = (frame_counter > 0ul)
                         ? (stress_dirty_sent_pixels * 1000ul) /
@@ -1437,7 +1476,8 @@ void mr_pico_stress_demo_main(void) {
       mr_stress_get_metrics(&stress, &m);
       stress_printf(
           "stress frame=%lu fps=%lu.%lu avg=%lu.%lu spr=%lu vis=%lu b=%lu "
-          "d=%lu rn=%lu px=%lu col=%lu/%lu mode=%d fixed=%d tri=%d frameUs=%lu "
+          "d=%lu rn=%lu px=%lu col=%lu/%lu mode=%d mode_name=%s fixed=%d tri=%d frameUs=%lu "
+          "updateUs=%lu rasterUs=%lu "
           "cpuUs=%lu flushUs=%lu sentKB=%lu dirty=%lu.%lu%% spans=%lu sys=%lu "
           "peri=%lu spi=%u serial=%d core1=%d lace=%d phases=%d "
           "sim_ticks=%lu sim_hz=%lu.%lu\n",
@@ -1445,7 +1485,8 @@ void mr_pico_stress_demo_main(void) {
           avg_fps10 % 10ul, m.sprite_count, m.sprites_visible, m.bucket_items,
           m.sprites_drawn, m.rle_runs_drawn, m.rle_pixels_copied,
           m.collision_hits, m.collision_checks, MR_STRESS_PICO_FLUSH_MODE,
-          MR_STRESS_FIXED_CAMERA, MR_STRESS_ENABLE_TRIANGLES, frame_us, cpu_us,
+          stress_mode_name(), MR_STRESS_FIXED_CAMERA,
+          MR_STRESS_ENABLE_TRIANGLES, frame_us, update_us, raster_us, cpu_us,
           flush_us, stress_flush_bytes / 1024ul, dirty_pct10 / 10ul,
           dirty_pct10 % 10ul, stress_dirty_spans,
           (unsigned long)clock_get_hz(clk_sys),
@@ -1458,6 +1499,8 @@ void mr_pico_stress_demo_main(void) {
       last_fps_ms = now;
       stress_frame_us_accum = 0u;
       stress_flush_us_accum = 0u;
+      stress_update_us_accum = 0u;
+      stress_raster_us_accum = 0u;
       stress_stat_window_frames = 0ul;
     }
   }

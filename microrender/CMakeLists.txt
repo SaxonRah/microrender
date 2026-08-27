@@ -118,7 +118,6 @@ set_property(CACHE MR_STRESS_MODE PROPERTY STRINGS
     raw visible render fixedrender everyN dirty dirtyfixed dirtyrect dirtyrectfixed lace lacefixed lcdtest)
 
 set(MR_STRESS_SPRITES    1024 CACHE STRING "Sprites per frame")
-set(MR_STRESS_TARGET_FPS 60   CACHE STRING "Frame pacing target")
 set(MR_STRESS_STATS_RATE 8    CACHE STRING "Stats sampling rate in frames")
 set(MR_STRESS_LCD_EVERY  4    CACHE STRING "Flush the LCD every N frames in everyN mode")
 set(MR_STRESS_HUD_MODE   2    CACHE STRING "HUD: 0 off, 1 full, 2 one-line")
@@ -269,10 +268,7 @@ set(MR_SOURCES
     "${MR_SHARED_SRC}/gfx_font5x7.c"
     "${MR_SHARED_SRC}/gfx_triangle.c"
     "${MR_SHARED_SRC}/gfx_rgb444.c"
-    "${MR_SHARED_SRC}/mr_timestep.c"
-    "${MR_SHARED_SRC}/gfx_engine.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
-    "${MR_SHARED_SRC}/mr_autodemo.c"
     "${MR_SHARED_RP2350}/mr_pico_ili9341.c"
     "${MR_SHARED_RP2350}/mr_pico_screenshot.c"
     "${MR_GENERATED_C}"
@@ -286,6 +282,9 @@ if(MR_APP STREQUAL "STRESS")
         "${MR_SHARED_RP2350}/mr_pico_stress_demo.c")
 else()
     list(APPEND MR_SOURCES
+        "${MR_SHARED_SRC}/mr_timestep.c"
+        "${MR_SHARED_SRC}/gfx_engine.c"
+        "${MR_SHARED_SRC}/mr_autodemo.c"
         "${MR_SHARED_SRC}/mr_game_demo.c"
         "${MR_SHARED_RP2350}/mr_pico_demo.c")
 endif()
@@ -357,7 +356,6 @@ if(MR_APP STREQUAL "STRESS")
     target_compile_definitions(microrender PRIVATE
         MR_STRESS_TEST=1
         MR_STRESS_SPRITES=${MR_STRESS_SPRITES}
-        MR_STRESS_TARGET_FPS=${MR_STRESS_TARGET_FPS}
         MR_STRESS_STATS_RATE=${MR_STRESS_STATS_RATE}
         MR_STRESS_HUD_MODE=${MR_STRESS_HUD_MODE}
         MR_STRESS_FIXED_CAMERA=${MR_STRESS_FIXED_CAMERA}

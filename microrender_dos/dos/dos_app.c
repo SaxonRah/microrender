@@ -75,6 +75,7 @@ typedef struct dos_options {
 
 static mr_timestep_t dos_step;
 static unsigned long dos_sim_ticks;
+static uint16_t dos_raw_prev_buttons;
 
 static gfx_color_t dos_tile_buffer[DOS_SCREEN_W * DOS_TILE_H];
 static mr_game_demo_t dos_game;
@@ -337,6 +338,18 @@ static void dos_read_keyboard_input_raw(mr_demo_input_t *input) {
   if (dos_key_down(DOS_SC_ESC) || dos_key_down(DOS_SC_Q))
     input->buttons |= MR_DEMO_INPUT_QUIT;
 
+  /* INT 9 gives us held physical state. Convert action/toggle keys to press
+     edges here so holding P does not toggle pause every simulation tick. */
+  {
+    uint16_t raw_buttons;
+    raw_buttons = input->buttons;
+    input->buttons =
+        (uint16_t)((raw_buttons & ~MR_DEMO_INPUT_EDGE_MASK) |
+                   ((raw_buttons & MR_DEMO_INPUT_EDGE_MASK) &
+                    ~(dos_raw_prev_buttons & MR_DEMO_INPUT_EDGE_MASK)));
+    dos_raw_prev_buttons = raw_buttons;
+  }
+
   if (input->buttons & MR_DEMO_INPUT_LEFT)
     input->dx -= 1;
   if (input->buttons & MR_DEMO_INPUT_RIGHT)
@@ -540,6 +553,7 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   unsigned long fps_tick;
   unsigned long fps_frame;
   int running;
+  uint16_t pending_edges;
 
 #if MR_DOS_PRESENT_MODE == 0
   /* dos_app_main allocates this before entering graphics mode so allocation
@@ -560,7 +574,9 @@ static int dos_run_shared_game(const dos_options_t *opt) {
 
   frame = 0UL;
   dos_sim_ticks = 0UL;
-  mr_timestep_init(&dos_step, 60, 5);
+  dos_raw_prev_buttons = 0u;
+  pending_edges = 0u;
+  mr_timestep_init(&dos_step, MR_GAME_TICK_HZ, 5);
   start_us = dos_vga_micros();
   start_tick = dos_vga_ticks();
   fps_tick = start_tick;
@@ -569,20 +585,31 @@ static int dos_run_shared_game(const dos_options_t *opt) {
   running = 1;
 
   while (running) {
-    if (!opt->autoplay)
+    if (!opt->autoplay) {
       dos_read_keyboard_input(&input);
+      pending_edges |= input.buttons & MR_DEMO_INPUT_EDGE_MASK;
+      input.buttons =
+          (uint16_t)((input.buttons & ~MR_DEMO_INPUT_EDGE_MASK) |
+                     pending_edges);
+    }
 
     {
       /* Scripted input is indexed by simulation tick rather than frame, so the
          autopilot follows the same path whether the host manages 15 frames a
-         second or 140. Live keyboard input is sampled once per frame and
-         reused for every step, which is what a held key means. */
+         second or 140. Live held input is sampled once per frame. One-shot
+         buttons stay pending across zero-step render frames, and are consumed
+         by only the first catch-up step. */
       int steps = mr_timestep_advance(&dos_step, dos_vga_micros());
       while (steps-- > 0) {
         if (opt->autoplay)
           mr_autodemo_input(dos_sim_ticks, &input);
         mr_game_demo_tick(&dos_game, &input);
         ++dos_sim_ticks;
+        if (!opt->autoplay) {
+          pending_edges = 0u;
+          input.buttons =
+              (uint16_t)(input.buttons & ~MR_DEMO_INPUT_EDGE_MASK);
+        }
       }
     }
     gfx_render_tiled(&dos_renderer, dos_draw_game_scene, &dos_game,

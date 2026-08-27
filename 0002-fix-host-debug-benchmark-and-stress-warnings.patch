@@ -1,0 +1,99 @@
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -4,11 +4,9 @@
+     "${MR_SHARED_SRC}/gfx_triangle.c"
+     "${MR_SHARED_SRC}/gfx_rgb444.c")
+ target_include_directories(microrender_gfx_bench PUBLIC "${MR_SHARED_SRC}")
+-if(MSVC)
+-    target_compile_options(microrender_gfx_bench PRIVATE /O2)
+-else()
+-    target_compile_options(microrender_gfx_bench PRIVATE -O2)
+-endif()
++# Optimisation comes from the dedicated Release "bench" preset. Do not force
++# /O2 or -O2 here: ordinary "build tests" is intentionally a Debug build, and
++# MSVC's /RTC1 cannot be combined with /O2.
+ 
+ add_library(microrender_engine STATIC
+     "${MR_SHARED_SRC}/gfx_engine.c")
+--- a/shared/src/mr_stress_test.c
++++ b/shared/src/mr_stress_test.c
+@@ -2,8 +2,11 @@
+   int i;
+   int hud_h;
+   int play_h;
++#if !MR_STRESS_FAST_METRICS
+   int sample_stats;
+   gfx_blit_stats_t stats;
++  gfx_blit_stats_t GFX_PTR *stats_ptr;
++#endif
+ 
+   if (!r || !st)
+     return;
+@@ -30,8 +33,9 @@
+ 
+   mr_stress_prepare_buckets(st, r->tile_h, hud_h);
+ 
++#if !MR_STRESS_FAST_METRICS
+   sample_stats = 0;
+-#if !MR_STRESS_FAST_METRICS
++  stats_ptr = 0;
+   if ((st->cfg.features & MR_STRESS_FEATURE_STATS) != 0) {
+     if (st->cfg.stats_sample_rate <= 1)
+       sample_stats = 1;
+@@ -42,6 +46,7 @@
+ 
+   if (sample_stats) {
+     memset(&stats, 0, sizeof(stats));
++    stats_ptr = &stats;
+     st->metrics.rle_runs_drawn = 0ul;
+     st->metrics.rle_pixels_copied = 0ul;
+     st->metrics.stats_sampled++;
+@@ -70,9 +75,12 @@
+       actor_index = (int)st->bucket_actor[i];
+       sx = st->actor_screen_x[actor_index];
+       sy = st->actor_screen_y[actor_index];
+-      if (sample_stats)
+-        gfx_blit_counted(r, &st->sprite, sx, sy, &stats);
+-      else {
++#if !MR_STRESS_FAST_METRICS
++      if (stats_ptr)
++        gfx_blit_counted(r, &st->sprite, sx, sy, stats_ptr);
++      else
++#endif
++      {
+         gfx_blit(r, &st->sprite, sx, sy);
+ #if !MR_STRESS_FAST_METRICS
+         st->metrics.sprites_drawn++;
+@@ -81,12 +89,14 @@
+     }
+   }
+ 
+-  if (sample_stats) {
+-    st->metrics.sprites_drawn += stats.sprites_drawn;
+-    st->metrics.sprites_rejected += stats.sprites_rejected;
+-    st->metrics.rle_runs_drawn += stats.rle_runs_drawn;
+-    st->metrics.rle_pixels_copied += stats.rle_pixels_copied;
++#if !MR_STRESS_FAST_METRICS
++  if (stats_ptr) {
++    st->metrics.sprites_drawn += stats_ptr->sprites_drawn;
++    st->metrics.sprites_rejected += stats_ptr->sprites_rejected;
++    st->metrics.rle_runs_drawn += stats_ptr->rle_runs_drawn;
++    st->metrics.rle_pixels_copied += stats_ptr->rle_pixels_copied;
+   }
++#endif
+ 
+   if ((st->cfg.features & MR_STRESS_FEATURE_HUD) != 0)
+     mr_stress_draw_hud(r, st);
+--- a/microrender_raylib/CMakeLists.txt
++++ b/microrender_raylib/CMakeLists.txt
+@@ -3,6 +3,10 @@
+     MR_RAYLIB_DEFAULT_LACE_BLOCK_H=${MR_RAYLIB_DEFAULT_LACE_BLOCK_H})
+ 
+ if(MSVC)
++    # fopen is the portable API used by the host/DOS capture paths. C4996 is
++    # MSVC's vendor deprecation warning, so keep the portable call and silence
++    # that warning for this frontend.
++    target_compile_definitions(microrender_raylib PRIVATE _CRT_SECURE_NO_WARNINGS)
+     target_compile_options(microrender_raylib PRIVATE /O2 /W4)
+ else()
+     target_compile_options(microrender_raylib PRIVATE -O3 -Wall -Wextra -Wpedantic)

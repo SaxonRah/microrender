@@ -107,7 +107,6 @@ typedef struct mr_stress_config {
   int screen_w;
   int screen_h;
   int sprite_count;
-  int target_fps;
   unsigned features;
   int stats_sample_rate;
 } mr_stress_config_t;
@@ -196,6 +195,9 @@ void mr_stress_config_defaults(mr_stress_config_t GFX_PTR *cfg, int screen_w,
                                int screen_h);
 void mr_stress_init(mr_stress_test_t GFX_PTR *st,
                     const mr_stress_config_t GFX_PTR *cfg);
+/* Advance one deterministic workload state. Benchmark frontends normally call
+   this exactly once per rendered stress frame; it is deliberately not a
+   wall-clock timestep. */
 void mr_stress_tick(mr_stress_test_t GFX_PTR *st);
 void mr_stress_render(gfx_renderer_t GFX_PTR *r, mr_stress_test_t GFX_PTR *st);
 void mr_stress_get_metrics(const mr_stress_test_t GFX_PTR *st,

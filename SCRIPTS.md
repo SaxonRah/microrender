@@ -140,13 +140,16 @@ useless for looking at anything.
 
 `watch` passes no `--frames`, so each window stays open until you close it, and
 closing advances to the next case. It caps at 60 FPS by default so motion runs
-at its intended speed.
+at a convenient viewing speed.
 
-Running the same case as `watch 60` and `watch 0` is the most direct check that
-frame rate and simulation rate are actually separate: since the simulation is
-on a fixed timestep, an uncapped window renders far more frames but the game
-must move at exactly the same speed. If the uncapped run is faster, the
-timestep decoupling is broken somewhere.
+For the **game** cases, running the same case as `watch 60` and `watch 0` is the
+most direct check that frame rate and simulation rate are separate: the
+uncapped window renders far more frames but the game must move at the same
+wall-clock speed.
+
+The **stress** cases are intentionally different. They advance one workload
+step per rendered frame, so uncapping them deliberately makes the stress scene
+advance faster. That is benchmark iteration rate, not game-time behavior.
 
 ```powershell
 .\scripts\mr_test_dos.bat           rem build only
@@ -274,10 +277,10 @@ platform at a time builds the comparison up rather than replacing it.
 Re-capturing a platform updates its row in place. Delete `capture\` to start
 over.
 
-The column worth reading in the report is `sim_hz`, not `fps_avg`. Frame rate
-is expected to differ by orders of magnitude between a Pico and an uncapped
-desktop window; the simulation rate is not, because the timestep is fixed. If
-`sim_hz` disagrees across platforms, the decoupling is broken somewhere.
+Interpret `sim_hz` by demo. For game rows it should stay near
+`MR_GAME_TICK_HZ` even when `fps_avg` differs by orders of magnitude. For stress
+rows it should intentionally track `fps_avg`, because one stress workload step
+is executed per rendered benchmark frame.
 
 ## Raylib submodule behavior
 

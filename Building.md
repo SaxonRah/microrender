@@ -12,6 +12,17 @@ settings use `key=value`; runtime frontend settings use their normal arguments.
 Both unquoted `key=value` and quoted `"key=value"` forms are accepted by the batch
 parser.
 
+The renderer itself is not fixed to 320×240. To compile only the portable
+renderer library, without the game, stress workload, clock code, or a platform
+frontend:
+
+```powershell
+cmake -S shared -B build-renderer -DMR_BUILD_ENGINE_HELPERS=OFF
+cmake --build build-renderer --target microrender_gfx
+```
+
+The 320×240 restriction belongs to the current DOS/Pico/Raylib frontends.
+
 ## Source checkout and Raylib submodule
 
 Raylib is pinned as `third_party/raylib`.
@@ -176,9 +187,12 @@ deleted and configured again automatically.
 | `presentation=raw/pipelined` | `MR_GAME_PRESENTATION` |
 | `hud=N` | `MR_STRESS_HUD_MODE` |
 | `lace=N` | `MR_STRESS_LACE_BLOCK_H` |
-| `target=N` | `MR_STRESS_TARGET_FPS` |
 | `serial=ON/OFF` | stress/game verbose USB logs |
 | `diag=ON/OFF` | `MR_STRESS_PICO_DIAG` |
+
+Stress builds have no shared frame-pacing target. They advance one workload
+step per rendered benchmark frame and run unrestricted unless the surrounding
+platform itself is explicitly synchronized or capped.
 
 Presentation and panel options have no short alias and are passed by their full
 cache variable name:

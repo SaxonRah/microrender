@@ -74,9 +74,11 @@ typedef struct host_state {
   double start_time;
   mr_timestep_t step;
   unsigned long sim_ticks;
+  uint16_t pending_edges;
 } host_state_t;
 
 static int arg_eq(const char *a, const char *b) { return strcmp(a, b) == 0; }
+static const char *mode_name(int mode);
 
 /* Capture output deliberately matches the Pico's MRSHOT1 serial format: an
    ASCII header line, then width*height little-endian RGB565 pixels. One
@@ -121,6 +123,7 @@ static int write_report(const char *path, const host_state_t *h,
   fprintf(f, "demo=%s\n",
           h->opt.demo == MR_HOST_DEMO_GAME ? "game" : "stress");
   fprintf(f, "width=%d\nheight=%d\n", MR_HOST_W, MR_HOST_H);
+  fprintf(f, "mode=%s\n", mode_name(h->opt.mode));
   fprintf(f, "tile_h=%d\n", h->opt.tile_h);
   fprintf(f, "sprites=%d\n", h->opt.sprites);
   fprintf(f, "fps_cap=%d\n", h->opt.target_fps);
@@ -129,9 +132,9 @@ static int write_report(const char *path, const host_state_t *h,
   fprintf(f, "fps_avg=%.2f\n",
           elapsed > 0.0 ? (double)h->frames / elapsed : 0.0);
   fprintf(f, "sim_ticks=%lu\n", h->sim_ticks);
-  /* Simulation rate is the number that should match across platforms. Frame
-     rate is expected to differ wildly; if this differs, the fixed timestep is
-     not doing its job. */
+  /* Game simulation is fixed-rate and should stay near MR_GAME_TICK_HZ across
+     platforms. Stress is intentionally frame-coupled, so its sim_hz should
+     track fps_avg: one workload advance per benchmark frame. */
   fprintf(f, "sim_hz=%.2f\n",
           elapsed > 0.0 ? (double)h->sim_ticks / elapsed : 0.0);
   fclose(f);
@@ -160,13 +163,17 @@ static void print_usage(void) {
 }
 
 static int parse_mode(const char *s) {
+  if (arg_eq(s, "tiled"))
+    return MR_HOST_MODE_TILED;
   if (arg_eq(s, "raw"))
     return MR_HOST_MODE_RAW;
   if (arg_eq(s, "lace"))
     return MR_HOST_MODE_LACE;
   if (arg_eq(s, "dirtyrect"))
     return MR_HOST_MODE_DIRTYRECT;
-  return MR_HOST_MODE_TILED;
+  fprintf(stderr, "MicroRender: unknown --mode '%s'\n", s ? s : "");
+  fprintf(stderr, "Expected raw, tiled, lace, or dirtyrect.\n");
+  exit(2);
 }
 
 static const char *mode_name(int mode) {
@@ -199,8 +206,14 @@ static void parse_options(int argc, char **argv, host_options_t *opt) {
       exit(0);
     } else if (arg_eq(argv[i], "--demo") && i + 1 < argc) {
       ++i;
-      opt->demo = arg_eq(argv[i], "stress") ? MR_HOST_DEMO_STRESS
-                                             : MR_HOST_DEMO_GAME;
+      if (arg_eq(argv[i], "stress"))
+        opt->demo = MR_HOST_DEMO_STRESS;
+      else if (arg_eq(argv[i], "game"))
+        opt->demo = MR_HOST_DEMO_GAME;
+      else {
+        fprintf(stderr, "MicroRender: unknown --demo '%s'\n", argv[i]);
+        exit(2);
+      }
     } else if (arg_eq(argv[i], "--mode") && i + 1 < argc) {
       ++i;
       opt->mode = parse_mode(argv[i]);
@@ -431,10 +444,10 @@ int main(int argc, char **argv) {
     mr_autodemo_reset();
   }
 
-  /* 60 Hz simulation, at most 5 steps per frame. Raylib is uncapped by
-     default, so without this the demo runs at whatever rate the GPU happens to
-     manage -- thousands of frames a second on a desktop. */
-  mr_timestep_init(&host.step, 60, 5);
+  /* Only the game is wall-clock driven. The stress benchmark deliberately
+     advances once per rendered frame and therefore remains fully uncapped. */
+  if (host.opt.demo == MR_HOST_DEMO_GAME)
+    mr_timestep_init(&host.step, MR_GAME_TICK_HZ, 5);
   host.sim_ticks = 0ul;
   host.start_time = GetTime();
   printf("MicroRender Raylib: 320x240 RGB565 demo=%s mode=%s tile=%d sprites=%d\n",
@@ -475,28 +488,39 @@ int main(int argc, char **argv) {
       /* The scripted input is a function of simulation time, not of how often
          the host redraws. Indexing it by frame made the autopilot change
          direction thousands of times a second on an uncapped window, so it
-         turned on the spot instead of travelling. Live input is sampled once
-         per frame and reused for every step of that frame, which is what a
-         player's held key actually means. */
-      if (!host.opt.autoplay)
+         turned on the spot instead of travelling.
+
+         Live held input is sampled once per render frame. Edge-triggered
+         actions are buffered until a simulation step consumes them: otherwise
+         a key pressed on one of the many zero-step frames at high FPS is lost.
+         After the first step the edge bits are cleared so a catch-up frame
+         cannot toggle pause/debug twice. */
+      if (!host.opt.autoplay) {
         host_input(&input);
+        host.pending_edges |= input.buttons & MR_DEMO_INPUT_EDGE_MASK;
+        input.buttons =
+            (uint16_t)((input.buttons & ~MR_DEMO_INPUT_EDGE_MASK) |
+                       host.pending_edges);
+      }
       while (steps-- > 0) {
         if (host.opt.autoplay)
           mr_autodemo_input(host.sim_ticks, &input);
         mr_game_demo_tick(&host.game, &input);
         ++host.sim_ticks;
+        if (!host.opt.autoplay) {
+          host.pending_edges = 0u;
+          input.buttons =
+              (uint16_t)(input.buttons & ~MR_DEMO_INPUT_EDGE_MASK);
+        }
       }
       if (mr_game_demo_quit_requested(&host.game))
         break;
     } else {
-      {
-        int steps = mr_timestep_advance(&host.step,
-                                        (unsigned long)(GetTime() * 1000000.0));
-        while (steps-- > 0) {
-          mr_stress_tick(&host.stress);
-          ++host.sim_ticks;
-        }
-      }
+      /* Benchmark state advances exactly once per rendered frame. This keeps
+         frame N deterministic across targets while allowing every target to
+         run the workload at its unrestricted maximum rate. */
+      mr_stress_tick(&host.stress);
+      ++host.sim_ticks;
     }
 
     if (host.opt.demo == MR_HOST_DEMO_GAME) {

@@ -3,17 +3,19 @@
 [![CI](https://github.com/SaxonRah/microrender/actions/workflows/ci.yml/badge.svg)](https://github.com/SaxonRah/microrender/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-MicroRender is a compact software renderer and shared game/stress-demo codebase for:
+MicroRender is a compact multiplatform software renderer first, with optional
+shared scene helpers plus game and stress-demo code for:
 
 - Raspberry Pi Pico 2 / RP2350 with an ILI9341 display
 - 16-bit DOS with Open Watcom and VGA Mode X
 - Windows, Linux, and macOS through Raylib
 - native host tests, fuzzing, and benchmarks
 
-The shared renderer targets a fixed **320×240 RGB565 logical image**. Pico and
-Raylib present RGB565 directly. DOS runs the same RGB565 shared code, then
-quantizes each completed region to a fixed RGB332 VGA palette while presenting
-to 320×240 Mode X.
+The current platform demos use a fixed **320×240 RGB565 logical image**, but the
+renderer core itself is not hard-wired to 320×240: `gfx_init()` receives the
+target width and height from its caller. Pico and Raylib present RGB565 directly.
+DOS runs the same RGB565 shared code, then quantizes each completed region to a
+fixed RGB332 VGA palette while presenting to 320×240 Mode X.
 
 The renderer owns no framebuffer allocation. Each frontend supplies either a
 small tile or a full-frame working buffer, plus presentation callbacks. That is
@@ -100,6 +102,26 @@ The raw path deliberately prevents drawing/presentation overlap:
 
 The shared game and stress HUDs render current and average FPS. Optional Pico
 serial logging is controlled separately from screenshot support.
+
+## Rendering rate versus simulation rate
+
+The renderer has no clock and no FPS policy. A frontend may call it as quickly
+as the target can run.
+
+- **Game demo:** deterministic fixed updates at `MR_GAME_TICK_HZ` (60 Hz), with
+  unrestricted rendering between updates. Faster hardware draws more frames;
+  it does not make the game move faster.
+- **Stress benchmark:** one deterministic stress update per rendered benchmark
+  frame. This is intentionally frame-coupled so the benchmark remains
+  unrestricted and frame N describes the same workload state on every target.
+
+The renderer can also be built by itself, with no game, stress, clock, or
+platform frontend:
+
+```text
+cmake -S shared -B build-renderer -DMR_BUILD_ENGINE_HELPERS=OFF
+cmake --build build-renderer --target microrender_gfx
+```
 
 ## Shared game demo
 
