@@ -165,12 +165,23 @@ not installed on the runners.
 ## Capture harness
 
 ```powershell
-python scripts\mr_capture.py raylib
-python scripts\mr_capture.py pico COM5
-python scripts\mr_capture.py pico COM5 stress-raw
-python scripts\mr_capture.py dos
-python scripts\mr_capture.py raylib dos pico COM5
+python scripts\mr_capture.py all                    # everything, unattended
+python scripts\mr_capture.py raylib                 # the Raylib matrix
+python scripts\mr_capture.py dos                    # the DOS matrix
+python scripts\mr_capture.py pico                   # capture from a Pico
+python scripts\mr_capture.py pico flash             # build, flash, capture
+python scripts\mr_capture.py pico COM5 stress-raw   # explicit port and preset
 ```
+
+`all` builds and flashes the Pico before capturing rather than trusting
+whatever is already on the board, since a stale image is the one way this
+report can be quietly wrong. It uses `picotool load -f -x`, which reboots a
+running board into the bootloader over USB and runs the new image afterwards,
+so the BOOTSEL button is not involved. `picotool` is taken from PATH or from
+the SDK install under `~/.pico-sdk`.
+
+The serial port is found by USB vendor ID (`2E8A`) rather than guessed, so it
+does not need naming.
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
 necessarily what you last built -- and a screenshot filed under the wrong label

@@ -10,11 +10,17 @@ pulled off a Pico over USB:
 
 Usage
 -----
-    python scripts/mr_capture.py raylib                 run the Raylib matrix
-    python scripts/mr_capture.py pico COM5              capture from a Pico
-    python scripts/mr_capture.py pico COM5 stress-raw   expect a different preset
-    python scripts/mr_capture.py dos                    run the DOS build
-    python scripts/mr_capture.py raylib dos pico COM5   all three
+    python scripts/mr_capture.py all                    everything, unattended
+    python scripts/mr_capture.py raylib                 the Raylib matrix
+    python scripts/mr_capture.py dos                    the DOS matrix
+    python scripts/mr_capture.py pico                   capture from a Pico
+    python scripts/mr_capture.py pico flash             build, flash, capture
+    python scripts/mr_capture.py pico COM5 stress-raw   explicit port and preset
+
+"all" builds and flashes the Pico before capturing, because a stale image is
+the one way this report can be quietly wrong. The port is found by USB vendor
+ID, so it does not need naming. Rows accumulate across runs, so capturing one
+platform at a time builds the same table up.
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
 necessarily the firmware you last built. The reported configuration is checked
@@ -124,7 +130,9 @@ def read_report(path):
 # platforms
 # --------------------------------------------------------------------------
 
-def capture_raylib(rows, frames=600):
+# 600 frames at 2,500 FPS is a quarter of a second, so startup dominates and
+# the simulation average comes out nearer 50 than 60. Long enough to measure.
+def capture_raylib(rows, frames=8000):
     exe = None
     for cand in ("microrender_raylib.exe", "microrender_raylib"):
         for sub in ("build/raylib/Release", "build/raylib", "build-raylib"):
@@ -218,7 +226,21 @@ def check_pico_config(fields, preset):
     return problems
 
 
-def capture_dos(rows, frames=900):
+# mr.bat run target -> label. The two game binaries differ only in present
+# mode, which is the comparison worth capturing: tiled strips versus a full
+# staged frame. The stress binaries have no capture hooks yet.
+DOS_CASES = [
+    ("dos", "game-tiled"),
+    ("dosraw", "game-raw"),
+]
+
+
+def capture_dos(rows, frames=2000):
+    for target, label in DOS_CASES:
+        capture_dos_case(rows, target, label, frames)
+
+
+def capture_dos_case(rows, target, label, frames):
     """Run the DOS build under DOSBox and collect its capture.
 
     Goes through mr.bat rather than invoking DOSBox directly: the runner
@@ -232,8 +254,9 @@ def capture_dos(rows, frames=900):
     """
     dosroot = os.path.join(ROOT, "microrender_dos", "dosroot")
     dist = os.path.join(ROOT, "microrender_dos", "dist")
-    if not (os.path.exists(os.path.join(dosroot, "mrender.exe")) or
-            os.path.exists(os.path.join(dist, "mrender.exe"))):
+    exe = {"dos": "mrender.exe", "dosraw": "mraw.exe"}.get(target, "mrender.exe")
+    if not (os.path.exists(os.path.join(dosroot, exe)) or
+            os.path.exists(os.path.join(dist, exe))):
         print("dos: mrender.exe not in dosroot\\ or dist\\; run")
         print("       .\\mr.bat build dos mode=both tile=16 vsync=0")
         return
@@ -251,10 +274,10 @@ def capture_dos(rows, frames=900):
     env["MR_DOSBOX_NOPAUSE"] = "1"
     # =value forms: a single token each, so nothing depends on how the runner
     # or DOS splits a two-token option.
-    cmd = [os.path.join(ROOT, "mr.bat"), "run", "dos", "/auto",
+    cmd = [os.path.join(ROOT, "mr.bat"), "run", target, "/auto",
            "/frames=%d" % frames, "/shot=dos.bin", "/report=dos.txt"]
-    print("dos: running under DOSBox (cycles=%s); waiting for the capture ..."
-          % env.get("MR_DOSBOX_CYCLES", "max"))
+    print("dos: %s under DOSBox (cycles=%s); waiting for the capture ..."
+          % (label, env.get("MR_DOSBOX_CYCLES", "max")))
     print("        %s" % " ".join(cmd[1:]))
     print("        watching %s" % shot)
     try:
@@ -320,17 +343,116 @@ def capture_dos(rows, frames=900):
               % frames)
         return
 
-    dest = os.path.join(OUT, "dos-game.bin")
+    dest = os.path.join(OUT, "dos-%s.bin" % label)
     os.replace(shot, dest)
     fields = read_report(rep)
     if os.path.exists(rep):
         os.remove(rep)
     if "cycles" not in fields:
         fields["cycles"] = env.get("MR_DOSBOX_CYCLES", "max")
-    rows.append(finish("dos", "game", dest, fields))
+    rows.append(finish("dos", label, dest, fields))
 
 
-def capture_pico(rows, port, preset="stress-lace", baud=115200):
+def find_picotool():
+    """picotool, from PATH or the SDK install the Pico extension lays down."""
+    for cand in ("picotool", "picotool.exe"):
+        try:
+            subprocess.run([cand, "version"], capture_output=True, timeout=15)
+            return cand
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    base = os.path.join(os.path.expanduser("~"), ".pico-sdk", "picotool")
+    if os.path.isdir(base):
+        # Newest version directory first.
+        for ver in sorted(os.listdir(base), reverse=True):
+            cand = os.path.join(base, ver, "picotool", "picotool.exe")
+            if os.path.exists(cand):
+                return cand
+            cand = os.path.join(base, ver, "picotool", "picotool")
+            if os.path.exists(cand):
+                return cand
+    return None
+
+
+def find_pico_port():
+    """The Pico's USB CDC port, by vendor ID rather than by guessing COM5."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+    for p in list_ports.comports():
+        if p.vid == 0x2E8A:
+            return p.device
+    return None
+
+
+def build_and_flash_pico(preset):
+    """Build the preset and load it over USB.
+
+    picotool can reboot a running board into BOOTSEL itself, because the
+    firmware enables the USB reset interface alongside stdio, so this does not
+    need the button. -x runs the image afterwards instead of leaving the board
+    sitting in the bootloader.
+    """
+    print("pico: building %s" % preset)
+    try:
+        r = subprocess.run([os.path.join(ROOT, "mr.bat"), "build", "pico",
+                            preset, "serial=ON"], cwd=ROOT, timeout=900)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        build failed: %s" % exc)
+        return False
+    if r.returncode != 0:
+        print("        build failed")
+        return False
+
+    uf2 = None
+    for root, _dirs, files in os.walk(os.path.join(ROOT, "microrender")):
+        if os.path.basename(root).startswith("build-" + preset) or \
+           os.path.basename(root) == "build-" + preset:
+            for f in files:
+                if f.endswith(".uf2"):
+                    uf2 = os.path.join(root, f)
+    if not uf2:
+        print("        no .uf2 produced for %s" % preset)
+        return False
+
+    tool = find_picotool()
+    if not tool:
+        print("        picotool not found; flash %s by hand" % uf2)
+        return False
+
+    print("        flashing %s" % os.path.basename(uf2))
+    try:
+        r = subprocess.run([tool, "load", "-f", "-x", uf2], timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        flash failed: %s" % exc)
+        return False
+    if r.returncode != 0:
+        print("        flash failed; is the board connected?")
+        return False
+
+    # The USB device disappears and re-enumerates, so the port is not there
+    # immediately after the reset.
+    for _ in range(40):
+        time.sleep(0.5)
+        if find_pico_port():
+            return True
+    print("        board did not re-enumerate after flashing")
+    return False
+
+
+def capture_pico(rows, port=None, preset="stress-lace", baud=115200,
+                 flash=False):
+    if flash and not build_and_flash_pico(preset):
+        return
+    if port is None:
+        port = find_pico_port()
+        if port is None:
+            print("pico: no board found (USB vendor 2E8A). Pass the port "
+                  "explicitly, e.g.  pico COM5")
+            return
+        print("pico: found board on %s" % port)
+
     try:
         import serial
     except ImportError:
@@ -514,24 +636,36 @@ def main(argv):
     os.makedirs(OUT, exist_ok=True)
     rows = []
 
+    targets = ("raylib", "dos", "pico", "all")
+
     i = 1
     while i < len(argv):
         what = argv[i]
-        if what == "raylib":
+        if what == "all":
+            # Everything, unattended: build and flash the Pico rather than
+            # capturing whatever happens to be on it, since a stale image is
+            # the one way this report can be quietly wrong.
+            capture_raylib(rows)
+            capture_dos(rows)
+            capture_pico(rows, None, "stress-lace", flash=True)
+        elif what == "raylib":
             capture_raylib(rows)
         elif what == "dos":
             capture_dos(rows)
         elif what == "pico":
-            if i + 1 >= len(argv):
-                print("pico needs a port, e.g.  pico COM5")
-                return 1
-            i += 1
-            port = argv[i]
+            port = None
             preset = "stress-lace"
-            if i + 1 < len(argv) and argv[i + 1] not in ("raylib", "pico", "dos"):
+            flash = False
+            while i + 1 < len(argv) and argv[i + 1] not in targets:
                 i += 1
-                preset = argv[i]
-            capture_pico(rows, port, preset)
+                arg = argv[i]
+                if arg == "flash":
+                    flash = True
+                elif arg.upper().startswith("COM") or "/" in arg:
+                    port = arg
+                else:
+                    preset = arg
+            capture_pico(rows, port, preset, flash=flash)
         else:
             print("unknown target: %s" % what)
             return 1
