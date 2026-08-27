@@ -252,9 +252,13 @@ def capture_dos(rows, frames=900):
            "/frames=%d" % frames, "/shot=dos.shot", "/report=dos.txt"]
     print("dos: running under DOSBox (cycles=%s); waiting for the capture ..."
           % env.get("MR_DOSBOX_CYCLES", "max"))
+    print("        %s" % " ".join(cmd[1:]))
+    print("        watching %s" % shot)
     try:
-        subprocess.run(cmd, cwd=ROOT, env=env, timeout=300,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Output is not swallowed: when this goes wrong it goes wrong inside
+        # the runner or DOSBox, and hiding that is what made the last three
+        # failures indistinguishable from each other.
+        subprocess.run(cmd, cwd=ROOT, env=env, timeout=300)
     except (OSError, subprocess.TimeoutExpired) as exc:
         print("        could not run: %s" % exc)
         return
@@ -283,9 +287,28 @@ def capture_dos(rows, frames=900):
         time.sleep(0.5)
 
     if not os.path.exists(shot):
-        print("        no capture produced. Run it by hand and read the DOSBox")
-        print("        window before it closes; the frontend prints whether the")
-        print("        capture was written:")
+        # The frontend writes relative to the DOSBox working directory, which
+        # is whatever got mounted as C:. If that is not the directory being
+        # watched, the file is still on disk somewhere -- find it and say so
+        # rather than reporting nothing at all.
+        for alt_dir in (dist, ROOT, os.path.join(ROOT, "microrender_dos")):
+            alt = os.path.join(alt_dir, "dos.shot")
+            if os.path.exists(alt):
+                print("        found the capture in %s instead" % alt_dir)
+                shot = alt
+                rep = os.path.join(alt_dir, "dos.txt")
+                break
+
+    if not os.path.exists(shot):
+        print("        no capture produced.")
+        print("        contents of %s:" % dosroot)
+        try:
+            for name in sorted(os.listdir(dosroot)):
+                print("          %s" % name)
+        except OSError as exc:
+            print("          cannot list: %s" % exc)
+        print("        Run it by hand and read the DOSBox window before it")
+        print("        closes; the frontend prints whether it wrote the file:")
         print("       .\\mr.bat run dos /auto /frames=%d /shot=dos.shot"
               % frames)
         return
