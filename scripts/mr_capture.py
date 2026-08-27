@@ -481,6 +481,33 @@ def build_and_flash_pico(preset):
     # up with a white display and never runs, while the same UF2 dragged on in
     # BOOTSEL works every time. Rather than fail the whole capture, ask for the
     # manual step and wait for the board to come back.
+    # Distinguish "firmware running but the panel is dead" from "firmware not
+    # running at all". Those have nothing in common as faults, and the serial
+    # enumeration says which one this is: no USB device means no firmware.
+    print()
+    try:
+        from serial.tools import list_ports
+        found = list(list_ports.comports())
+        print("        serial devices present after flashing:")
+        if not found:
+            print("          (none)")
+        for pi in found:
+            print("          %-8s vid=%s pid=%s  %s"
+                  % (pi.device,
+                     ("%04X" % pi.vid) if pi.vid else "----",
+                     ("%04X" % pi.pid) if pi.pid else "----",
+                     pi.description))
+        if not any(pi.vid == 0x2E8A for pi in found):
+            print("        No 2E8A device at all, so the firmware is not")
+            print("        running -- this is a boot failure, not a display")
+            print("        fault, and the panel is a red herring.")
+        else:
+            print("        A 2E8A device is present but not answering PING,")
+            print("        so the firmware is running and something later in")
+            print("        init is wrong.")
+    except ImportError:
+        pass
+
     print()
     print("        The flashed image is not responding. This board needs a")
     print("        manual flash: hold BOOTSEL, replug, and drag this file on:")
