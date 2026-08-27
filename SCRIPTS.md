@@ -175,32 +175,28 @@ python scripts\mr_capture.py pico COM5 stress-raw   # explicit port and preset
 
 `all` builds and flashes the Pico before capturing rather than trusting
 whatever is already on the board, since a stale image is the one way this
-report can be quietly wrong. It uses `picotool load -f -x`, which reboots a
-running board into the bootloader over USB and runs the new image afterwards,
-so the BOOTSEL button is not involved. `picotool` is taken from PATH or from
-the SDK install under `~/.pico-sdk`.
+report can be quietly wrong.
+
+Three flashing methods, all sharing one build:
+
+```powershell
+python scripts\mr_capture.py pico flash      # SWD via OpenOCD (default)
+python scripts\mr_capture.py pico picotool   # picotool load -f -x over USB
+python scripts\mr_capture.py pico manual     # prompts for a BOOTSEL drag
+```
+
+SWD is the default and programs the `.elf` directly through OpenOCD, which is
+found on PATH or under `~/.pico-sdk/openocd`. `picotool` programs the `.uf2`
+over USB by rebooting a running board into the bootloader. Each falls back to
+the manual BOOTSEL path if it cannot complete, so a missing OpenOCD is not
+fatal.
 
 The serial port is found by asking rather than guessing: each candidate is sent
 `PING` and the one answering `MRPICO1` is used. Vendor ID alone is not enough,
 because a debug probe enumerates under the same `2E8A` and picking the first
 match lands on the probe as often as on the board.
 
-`picotool` reboots via the watchdog, which restarts the CPU without
-power-cycling anything else: the previous image's DMA channels can still be
-running and its core 1 can still be executing, both against the same SPI
-peripheral the new image is about to configure. Dragging a UF2 on in BOOTSEL is
-a genuine cold start and does not have the problem, which is why an automatic
-flash could come up with a white display where a manual one did not.
-
-The firmware aborts every DMA channel and parks core 1 before touching any
-peripheral, which should make a warm boot equivalent to a cold one. On at least
-one board it does not: a `picotool`-flashed image still comes up with a white
-display, while the same UF2 dragged on in BOOTSEL works every time. The cause
-is not known.
-
-The harness handles it rather than failing: if the flashed image does not
-answer, it prints the UF2 path, asks for a manual BOOTSEL flash, and waits for
-the board to come back before continuing. To skip flashing entirely:
+To capture without flashing at all:
 
 ```powershell
 python scripts\mr_capture.py pico

@@ -273,86 +273,52 @@ itself.
 
 ---
 
-## 8. Warm boots are not cold boots (unresolved)
+## 8. Initialising a panel above its rated clock — SOLVED
 
 **Observed.** A board flashed with `picotool load -f -x` came up with a white
-display and stayed there, twice. Dragging the same UF2 on manually in BOOTSEL
-worked every time.
+display and stayed there. Dragging the same UF2 on manually in BOOTSEL worked
+every time.
 
-**Mechanism.** `-x` reboots through the watchdog. That restarts the CPU and
-nothing else: the previous image's DMA channels keep running and its core 1
-keeps executing, both against the SPI peripheral the new image is about to
-configure. In this configuration core 1 owns the panel, so the incoming
-firmware initialises a display that something else is still driving. A UF2 drag
-is a real cold start, which is why it never showed the fault.
+**Four wrong answers first**, each costing a flash cycle to disprove:
 
-**Attempted fix, which did not work.** Abort every DMA channel and reset core 1
-before any peripheral setup, so a warm boot starts from the same state as a
-cold one. The code is in both Pico frontends and runs before anything else. It
-made no difference: the board still comes up white after `picotool load -x` and
-still needs a manual BOOTSEL flash.
+1. A warm reboot leaves core 1 running against the panel. Wrong: aborting DMA
+   and resetting core 1 before any peripheral setup changed nothing.
+2. Stale DMA against the SPI peripheral. Same change, same result.
+3. Core 1 at all. Wrong: `stress-visible`, which disables the presenter
+   entirely, fails identically.
+4. The RESX pulse is too short. Wrong, and worth dwelling on. The datasheet
+   asks for 10 us of RESX and 120 ms before Sleep Out; the driver was already
+   doing 30 ms and 120 ms, so 3000x and exactly the requirement. Reset timing
+   was never out of spec. Lengthening it was a guess dressed as a fix, and it
+   was bundled with a second change, which would have made the result
+   uninterpretable even if it had worked.
 
-**So the mechanism above is wrong, or incomplete.** Stale DMA and a stale core 1
-are not what is breaking it, because the incoming image now clears both before
-touching a peripheral and the symptom is unchanged. The DMA abort is kept as
-hygiene -- it is correct regardless -- but it is not a fix and is not presented
-as one.
+**What it actually was.** The ILI9341's 4-wire serial interface specifies a
+100 ns minimum write cycle: 10 MHz. The panel was being initialised at
+`MR_LCD_SPI_BAUD`, 75 MHz. That is 7.5x over rated, and unlike every reset
+timing above, it is a genuine specification violation sitting in plain sight.
 
-**The firmware is not the problem.** After a `picotool` flash the board answers
-`PING` on USB, streams metrics, reports the correct clocks and pixel format, and
-produces a valid screenshot. Only the physical panel is white. The screenshot is
-re-rendered from the framebuffer rather than read back from the display, which
-is why the capture is correct while the display is not.
+75 MHz works for pixel traffic once the controller is up, which is why it never
+looked suspicious. But *works once initialised* is a different claim from
+*works while coming out of reset*. A cold boot gives the panel its own power-on
+reset and lets its rails and oscillator settle before the first command. A warm
+boot leaves it powered and running, hits it with RESX, and immediately resumes
+traffic at 7.5x rated. The margin a settled controller tolerates is not
+necessarily there during recovery — which is exactly the cold-versus-warm split
+that was observed and that four firmware theories failed to explain.
 
-That rules out a boot failure and narrows this to the panel initialisation
-specifically, with everything else in the image demonstrably working.
+**Fix.** Initialise at 8 MHz, restore `MR_LCD_SPI_BAUD` before the first frame.
+The init sequence is a few dozen bytes, so compliance costs nothing measurable
+and every frame still goes out at 75 MHz. USB, SWD and manual flashing all work
+afterwards.
 
-**Core 1 ruled out.** Flashing `stress-visible`, which sets
-`MR_PICO_PRESENT_CORE1=OFF`, white-screens the same way. So the presenter is not
-involved and the fault is somewhere in the init path every Pico build shares.
-
-**Status: unresolved.** Established so far:
-
-- reproduces on `picotool load -f -x`, every time
-- never happens on a manual BOOTSEL flash of the same UF2, every time
-- aborting DMA and resetting core 1 before any peripheral setup does not help
-- happens with core 1 disabled entirely
-
-The remaining difference between the two paths is that a manual BOOTSEL flash
-involves unplugging the board, which power-cycles the ILI9341 module as well as
-the RP2350. Nothing in the `picotool` path removes power from the panel. That
-makes the panel's own state the leading suspect rather than anything in the
-firmware -- and it would explain why every firmware-side fix has missed.
-
-RST is wired to GPIO 8 on this board, so the driver's reset sequence does reach
-the panel. The sequence itself is unremarkable: RST low 30 ms, high 120 ms,
-`SWRESET`, 150 ms, `SLPOUT`, 150 ms.
-
-So the panel is being reset and still does not come up, on a warm boot only.
-The remaining candidates are timing rather than logic -- an ILI9341 whose supply
-never dipped may need longer than a cold one to accept a reset, or may need the
-reset held longer than 30 ms to actually take.
-
-**Practical impact: none on the capture.** The screenshot is rendered rather
-than read back, so the report is correct regardless. This costs one manual
-flash per capture run and nothing else, which is why it is being left
-documented rather than chased further.
-
-**Next experiment, if it is ever worth it.** The firmware is alive and already
-has a serial command interface, so a command that re-runs `panel_init()` on
-demand would settle it: if a later re-init fixes the white screen, the reset
-sequence works and the problem is that it runs too early after a warm boot. If
-it does not, the panel is in a state no reset clears without a power cycle.
-That is one instrumented test rather than another guess, and it is the point at
-which to resume.
-
-The capture harness no longer treats this as fatal: it asks for the manual
-flash and waits for the board to reappear.
-
-**Worth recording even unresolved.** The symptom appears at flash time rather
-than run time, so it reads as a bad flash rather than as a difference between
-warm and cold starts. That framing is what made the first two attempts look
-plausible.
+**The lesson is about where to look.** Every wrong answer was a theory about
+*state* — what the previous image left behind. The right answer was about
+*specification* — a documented limit being exceeded by 7.5x in the one code path
+that only runs when the panel is least able to tolerate it. The specification
+violation was visible from the first line of the driver and required no
+hardware to find; the state theories each required a flash cycle to disprove.
+Read the datasheet before theorising about ghosts.
 
 ---
 
