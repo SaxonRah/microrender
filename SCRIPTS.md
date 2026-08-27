@@ -185,14 +185,17 @@ The serial port is found by asking rather than guessing: each candidate is sent
 because a debug probe enumerates under the same `2E8A` and picking the first
 match lands on the probe as often as on the board.
 
-`picotool` reboots via the watchdog, which restarts the core without
-power-cycling the panel or the second core. Observed once: a board flashed this
-way came up with a white display and needed a manual reflash to recover. The
-mechanism is unconfirmed -- a warm reboot leaving core 1 or the panel in a
-stale state is consistent with it, but it has not been reproduced deliberately.
+`picotool` reboots via the watchdog, which restarts the CPU without
+power-cycling anything else: the previous image's DMA channels can still be
+running and its core 1 can still be executing, both against the same SPI
+peripheral the new image is about to configure. Dragging a UF2 on in BOOTSEL is
+a genuine cold start and does not have the problem, which is why an automatic
+flash could come up with a white display where a manual one did not.
 
-If the display comes up white after an automatic flash, power-cycle the board
-and capture without the flash step:
+The firmware now aborts every DMA channel and parks core 1 before touching any
+peripheral, so a warm boot behaves like a cold one. If a board flashed before
+that change still misbehaves, power-cycle it and capture without the flash
+step:
 
 ```powershell
 python scripts\mr_capture.py pico

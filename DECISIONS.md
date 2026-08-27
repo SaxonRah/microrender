@@ -273,6 +273,30 @@ itself.
 
 ---
 
+## 8. Warm boots are not cold boots
+
+**Observed.** A board flashed with `picotool load -f -x` came up with a white
+display and stayed there, twice. Dragging the same UF2 on manually in BOOTSEL
+worked every time.
+
+**Mechanism.** `-x` reboots through the watchdog. That restarts the CPU and
+nothing else: the previous image's DMA channels keep running and its core 1
+keeps executing, both against the SPI peripheral the new image is about to
+configure. In this configuration core 1 owns the panel, so the incoming
+firmware initialises a display that something else is still driving. A UF2 drag
+is a real cold start, which is why it never showed the fault.
+
+**Fix.** Abort every DMA channel and reset core 1 before any peripheral setup.
+On a cold boot there is nothing to abort and it costs microseconds; on a warm
+boot it makes the machine look like it was just powered on.
+
+**Worth generalising.** Any firmware reachable by watchdog reboot, USB reset
+interface, or `picotool` inherits this, and the symptom appears at flash time
+rather than at run time -- so it reads as a bad flash rather than as a missing
+assumption about initial state.
+
+---
+
 ## Process failures worth recording
 
 **Four debugging cycles were lost to CMake cache contamination.** Build

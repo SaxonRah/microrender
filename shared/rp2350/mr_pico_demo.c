@@ -4,6 +4,7 @@
 #include "mr_autodemo.h"
 #include "mr_game_demo.h"
 #include "mr_timestep.h"
+#include "hardware/dma.h"
 #include "mr_pico_ili9341.h"
 #include "mr_pico_screenshot.h"
 
@@ -77,7 +78,18 @@ static void screenshot_wait_for_display(void *user) {
 }
 
 
+/* Same warm-boot recovery as the stress frontend: a watchdog reboot leaves the
+   previous image's DMA channels running against the same SPI peripheral this
+   one is about to configure. See mr_pico_stress_demo.c for the full note. */
+static void demo_recover_from_warm_boot(void) {
+  dma_hw->abort = (uint32_t)~0u;
+  while (dma_hw->abort)
+    tight_loop_contents();
+}
+
 void mr_pico_demo_main(void) {
+  demo_recover_from_warm_boot();
+
   uint32_t now;
   mr_demo_input_t input;
 

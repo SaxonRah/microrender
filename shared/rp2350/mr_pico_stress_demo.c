@@ -11,6 +11,7 @@
 #include "gfx.h"
 #include "mr_timestep.h"
 #include "hardware/clocks.h"
+#include "hardware/dma.h"
 #include "hardware/pll.h"
 #include "hardware/regs/clocks.h"
 #include "hardware/timer.h"
@@ -1176,10 +1177,40 @@ static void stress_clear_lcd(gfx_color_t color) {
     mr_pico_ili9341_flush(0, 0, y, MR_SCREEN_W, 1, line, &lcd);
 }
 
+/* Recover from a warm boot.
+ *
+ * picotool's "load -x", the USB reset interface, and any watchdog reboot
+ * restart the CPU without power-cycling anything else. The previous image's
+ * DMA channels can still be running, its core 1 can still be executing, and
+ * both of those touch the same SPI peripheral this image is about to
+ * configure. Dragging a UF2 onto the board in BOOTSEL is a genuine cold start
+ * and does not have the problem, which is why an automatic flash could come up
+ * with a white display where a manual one did not.
+ *
+ * Aborting every DMA channel and parking core 1 before any peripheral setup
+ * costs microseconds on a cold boot, where there is nothing to abort, and
+ * makes a warm boot behave like a cold one.
+ */
+static void stress_recover_from_warm_boot(void) {
+#if MR_LACE_CORE1
+  /* Safe when core 1 was never started: the reset is unconditional. */
+  multicore_reset_core1();
+#endif
+
+  /* Abort every channel, then wait for the aborts to retire. A channel left
+     mid-transfer would otherwise keep feeding the SPI FIFO underneath the
+     panel initialisation sequence. */
+  dma_hw->abort = (uint32_t)~0u;
+  while (dma_hw->abort)
+    tight_loop_contents();
+}
+
 void mr_pico_stress_demo_main(void) {
   mr_stress_config_t cfg;
   uint32_t now;
   int clock_ok;
+
+  stress_recover_from_warm_boot();
 
   stress_wait_for_usb_if_requested();
 
