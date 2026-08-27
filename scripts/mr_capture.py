@@ -259,9 +259,18 @@ def capture_dos(rows, frames=900):
         print("        could not run: %s" % exc)
         return
 
+    # The runner blocks on DOSBox, but if a future change to it regresses that,
+    # waiting briefly here turns a confusing "no capture" into a slow success.
+    for _ in range(20):
+        if os.path.exists(shot):
+            break
+        time.sleep(0.5)
+
     if not os.path.exists(shot):
-        print("        no capture produced. Try it by hand to see the error:")
-        print("       .\\mr.bat run dos /auto /frames %d /shot dos.shot"
+        print("        no capture produced. Run it by hand and read the DOSBox")
+        print("        window before it closes; the frontend prints whether the")
+        print("        capture was written:")
+        print("       .\\mr.bat run dos /auto /frames=%d /shot=dos.shot"
               % frames)
         return
 

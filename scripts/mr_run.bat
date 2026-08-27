@@ -183,8 +183,16 @@ if not "%MR_DOSBOX_NOPAUSE%"=="1" (
 >>"%CONF%" echo exit
 
 echo Launching %EXE% !DOSARGS! (cycles=%CYCLES%)
-rem Run in the foreground so the exit code propagates to capture scripts.
-"%MR_DOSBOX%" -conf "%CONF%"
+rem DOSBox is a GUI-subsystem executable, so cmd does not wait for it: calling
+rem it directly returns immediately while DOSBox is still starting. That broke
+rem two things at once. The config file below was deleted out from under DOSBox
+rem before it had finished reading it, and capture scripts looked for output
+rem files before the program had run at all.
+rem
+rem start /wait blocks until the process exits and still propagates its exit
+rem code. The empty "" is the window title, which start requires when the first
+rem quoted argument is the program path.
+start /wait "" "%MR_DOSBOX%" -conf "%CONF%"
 set "RC=%ERRORLEVEL%"
 del "%CONF%" >nul 2>nul
 exit /b %RC%
