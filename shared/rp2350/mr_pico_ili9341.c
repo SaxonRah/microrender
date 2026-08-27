@@ -16,6 +16,8 @@
 #define ILI9341_COLMOD 0x3Au
 #define ILI9341_FRMCTR1 0xB1u
 
+#define ILI9341_INIT_SPI_BAUD 8000000u
+
 static inline void lcd_gpio_put_fast(unsigned int pin, unsigned int value) {
   if (pin < 32u) {
     if (value)
@@ -153,6 +155,16 @@ void mr_pico_ili9341_init(mr_pico_ili9341_t *ctx) {
 
 void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
   uint8_t data;
+  uint32_t run_baud;
+
+  /*
+   * Keep the high SPI rate for framebuffer traffic, but initialize the panel
+   * conservatively. A warm picotool reboot does not remove power from the
+   * ILI9341, and this reset/sleep-out path is the only part that behaves
+   * differently from a cold BOOTSEL flash.
+   */
+  run_baud = ctx->spi_baud_hz;
+  (void)spi_set_baudrate(ctx->spi, ILI9341_INIT_SPI_BAUD);
 
   gpio_put(ctx->pin_rst, 0);
   sleep_ms(30);
@@ -184,6 +196,9 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
 
   lcd_write_cmd(ctx, ILI9341_DISPON);
   sleep_ms(120);
+
+  /* Restore the established high-speed rate used by normal pixel transfers. */
+  ctx->spi_baud_hz = spi_set_baudrate(ctx->spi, run_baud);
 }
 
 void mr_pico_ili9341_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,

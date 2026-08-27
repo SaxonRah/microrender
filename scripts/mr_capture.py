@@ -10,17 +10,24 @@ pulled off a Pico over USB:
 
 Usage
 -----
-    python scripts/mr_capture.py all                    everything, unattended
+    python scripts/mr_capture.py all                    everything; Pico via SWD
     python scripts/mr_capture.py raylib                 the Raylib matrix
     python scripts/mr_capture.py dos                    the DOS matrix
     python scripts/mr_capture.py pico                   capture from a Pico
-    python scripts/mr_capture.py pico flash             build, flash, capture
+    python scripts/mr_capture.py pico flash             build, SWD flash, capture
+    python scripts/mr_capture.py pico picotool          build, USB flash, capture
+    python scripts/mr_capture.py pico manual            build, manual UF2, capture
     python scripts/mr_capture.py pico COM5 stress-raw   explicit port and preset
 
-"all" builds and flashes the Pico before capturing, because a stale image is
-the one way this report can be quietly wrong. The port is found by USB vendor
-ID, so it does not need naming. Rows accumulate across runs, so capturing one
-platform at a time builds the same table up.
+"all" builds and flashes the Pico over SWD before capturing, because a stale
+image is the one way this report can be quietly wrong. If SWD/OpenOCD is not
+available or programming fails, the exact UF2 path is printed and the harness
+waits for a manual BOOTSEL drag-and-drop. The old picotool warm-flash path is
+still available explicitly with "pico picotool".
+
+The application serial port is identified by the MicroRender PING protocol
+rather than USB vendor ID alone, because a CMSIS-DAP debug probe can enumerate
+under the same Raspberry Pi vendor ID as the target.
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
 necessarily the firmware you last built. The reported configuration is checked
@@ -35,6 +42,7 @@ zlib directly rather than pulling in Pillow. Pico capture needs pyserial.
 
 import csv
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -374,6 +382,57 @@ def find_picotool():
     return None
 
 
+def find_openocd():
+    """The Pico VS Code extension's OpenOCD plus its script directory."""
+    candidates = []
+    explicit = os.environ.get("OPENOCD")
+    if explicit:
+        candidates.append(explicit)
+
+    for name in ("openocd", "openocd.exe"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+
+    base = os.path.join(os.path.expanduser("~"), ".pico-sdk", "openocd")
+    if os.path.isdir(base):
+        # The extension has used both <ver>/openocd.exe and <ver>/bin/.
+        for ver in sorted(os.listdir(base), reverse=True):
+            root = os.path.join(base, ver)
+            for rel in ("openocd.exe", os.path.join("bin", "openocd.exe"),
+                        "openocd", os.path.join("bin", "openocd")):
+                cand = os.path.join(root, rel)
+                if os.path.exists(cand):
+                    candidates.append(cand)
+
+    explicit_scripts = os.environ.get("OPENOCD_SCRIPTS")
+    seen = set()
+    for tool in candidates:
+        key = os.path.normcase(os.path.abspath(tool))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        tool_dir = os.path.dirname(os.path.abspath(tool))
+        roots = []
+        if explicit_scripts:
+            roots.append(explicit_scripts)
+        roots.extend([
+            os.path.join(tool_dir, "scripts"),
+            os.path.join(tool_dir, "share", "openocd", "scripts"),
+            os.path.join(os.path.dirname(tool_dir), "scripts"),
+            os.path.join(os.path.dirname(tool_dir), "share", "openocd",
+                         "scripts"),
+        ])
+        for scripts in roots:
+            if (os.path.exists(os.path.join(
+                    scripts, "interface", "cmsis-dap.cfg")) and
+                    os.path.exists(os.path.join(
+                        scripts, "target", "rp2350.cfg"))):
+                return tool, scripts
+    return None, None
+
+
 def pico_ping(port, baud=115200, timeout=2.0):
     """True when a MicroRender firmware answers on this port.
 
@@ -425,14 +484,146 @@ def find_pico_port():
     return None
 
 
-def build_and_flash_pico(preset):
-    """Build the preset and load it over USB.
+def wait_for_pico(timeout=20.0):
+    """Wait for a running MicroRender application, not merely a USB device."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        port = find_pico_port()
+        if port:
+            return port
+        time.sleep(0.5)
+    return None
 
-    picotool can reboot a running board into BOOTSEL itself, because the
-    firmware enables the USB reset interface alongside stdio, so this does not
-    need the button. -x runs the image afterwards instead of leaving the board
-    sitting in the bootloader.
-    """
+
+def find_pico_build_outputs(preset):
+    """The ELF for SWD and UF2 for picotool/manual flashing."""
+    build = os.path.join(ROOT, "microrender", "build-" + preset)
+    elf = os.path.join(build, "microrender.elf")
+    uf2 = os.path.join(build, "microrender.uf2")
+    if os.path.exists(elf) and os.path.exists(uf2):
+        return elf, uf2
+
+    found_elf = None
+    found_uf2 = None
+    if os.path.isdir(build):
+        for root, _dirs, files in os.walk(build):
+            for name in files:
+                if name == "microrender.elf":
+                    found_elf = os.path.join(root, name)
+                elif name == "microrender.uf2":
+                    found_uf2 = os.path.join(root, name)
+    return found_elf, found_uf2
+
+
+def manual_flash_pico(uf2):
+    """Tell the user exactly what to drag, then wait for a real flash cycle."""
+    was_running = find_pico_port() is not None
+
+    print()
+    print("pico: manual BOOTSEL flash required")
+    print("      1. Hold BOOTSEL and connect/reset the target into BOOTSEL.")
+    print("      2. Drag this exact UF2 onto the RPI-RP2 drive:")
+    print("           %s" % uf2)
+    print("      3. Let the board reboot; capture will continue automatically.")
+    print("      Waiting for BOOTSEL -> application (Ctrl+C to give up) ...")
+
+    # Do not immediately accept the old firmware that may still be answering.
+    # A real manual flash makes the application CDC port disappear while the
+    # target is in BOOTSEL, then reappear after the UF2 has been consumed.
+    saw_application_disappear = not was_running
+    deadline = time.time() + 300.0
+    while time.time() < deadline:
+        port = find_pico_port()
+        if port is None:
+            saw_application_disappear = True
+        elif saw_application_disappear:
+            print("      board is back on %s" % port)
+            return True
+        time.sleep(0.5)
+
+    print("      gave up waiting for the manual flash.")
+    return False
+
+
+def flash_pico_swd(elf):
+    """Program the ELF through the CMSIS-DAP/SWD path used by Pico VS Code."""
+    tool, scripts = find_openocd()
+    if not tool:
+        print("        Pico OpenOCD/CMSIS-DAP setup not found.")
+        return False
+
+    elf_tcl = os.path.abspath(elf).replace("\\", "/")
+    cmd = [
+        tool,
+        "-s", scripts,
+        "-f", "interface/cmsis-dap.cfg",
+        "-f", "target/rp2350.cfg",
+        "-c", "adapter speed 5000; program {%s} verify reset exit" % elf_tcl,
+    ]
+    print("        SWD flashing %s" % os.path.basename(elf))
+    print("        OpenOCD: %s" % tool)
+    try:
+        r = subprocess.run(cmd, cwd=ROOT, timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        SWD flash failed: %s" % exc)
+        return False
+    if r.returncode != 0:
+        print("        SWD flash failed (OpenOCD exit %d)" % r.returncode)
+        return False
+
+    port = wait_for_pico(20.0)
+    if port:
+        print("        SWD flash complete; board is on %s" % port)
+        return True
+    print("        OpenOCD succeeded, but MicroRender did not answer afterward.")
+    return False
+
+
+def flash_pico_picotool(uf2):
+    """Keep the old USB/BootROM warm-flash path available explicitly."""
+    tool = find_picotool()
+    if not tool:
+        print("        picotool not found")
+        return False
+
+    print("        WARNING: picotool warm flashing is known to leave this")
+    print("        hardware's physical ILI9341 white. SWD is the default.")
+    print("        picotool flashing %s" % os.path.basename(uf2))
+    try:
+        r = subprocess.run([tool, "load", "-f", "-x", uf2], timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("        picotool flash failed: %s" % exc)
+        return False
+    if r.returncode != 0:
+        print("        picotool flash failed; is the board connected?")
+        return False
+
+    port = wait_for_pico(20.0)
+    if port:
+        print("        picotool flash complete; board is on %s" % port)
+        return True
+
+    # Preserve the useful enumeration diagnostic from the old failure path.
+    print()
+    try:
+        from serial.tools import list_ports
+        found = list(list_ports.comports())
+        print("        serial devices present after picotool flashing:")
+        if not found:
+            print("          (none)")
+        for pi in found:
+            print("          %-8s vid=%s pid=%s  %s"
+                  % (pi.device,
+                     ("%04X" % pi.vid) if pi.vid else "----",
+                     ("%04X" % pi.pid) if pi.pid else "----",
+                     pi.description))
+    except ImportError:
+        pass
+    return False
+
+
+def build_and_flash_pico(preset, method="swd"):
+    """Build once, then flash by SWD, picotool, or manual BOOTSEL."""
     print("pico: building %s" % preset)
     try:
         r = subprocess.run([os.path.join(ROOT, "mr.bat"), "build", "pico",
@@ -444,89 +635,37 @@ def build_and_flash_pico(preset):
         print("        build failed")
         return False
 
-    uf2 = None
-    for root, _dirs, files in os.walk(os.path.join(ROOT, "microrender")):
-        if os.path.basename(root).startswith("build-" + preset) or \
-           os.path.basename(root) == "build-" + preset:
-            for f in files:
-                if f.endswith(".uf2"):
-                    uf2 = os.path.join(root, f)
+    elf, uf2 = find_pico_build_outputs(preset)
     if not uf2:
-        print("        no .uf2 produced for %s" % preset)
+        print("        no microrender.uf2 produced for %s" % preset)
         return False
 
-    tool = find_picotool()
-    if not tool:
-        print("        picotool not found; flash %s by hand" % uf2)
-        return False
+    if method == "manual":
+        return manual_flash_pico(uf2)
 
-    print("        flashing %s" % os.path.basename(uf2))
-    try:
-        r = subprocess.run([tool, "load", "-f", "-x", uf2], timeout=180)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print("        flash failed: %s" % exc)
-        return False
-    if r.returncode != 0:
-        print("        flash failed; is the board connected?")
-        return False
-
-    # The USB device disappears and re-enumerates, so the port is not there
-    # immediately after the reset.
-    for _ in range(40):
-        time.sleep(0.5)
-        if find_pico_port():
+    if method == "picotool":
+        if flash_pico_picotool(uf2):
             return True
+        print("        picotool did not produce an answering target;")
+        print("        falling back to manual BOOTSEL.")
+        return manual_flash_pico(uf2)
 
-    # Known unresolved: on at least one board, a picotool-flashed image comes
-    # up with a white display and never runs, while the same UF2 dragged on in
-    # BOOTSEL works every time. Rather than fail the whole capture, ask for the
-    # manual step and wait for the board to come back.
-    # Distinguish "firmware running but the panel is dead" from "firmware not
-    # running at all". Those have nothing in common as faults, and the serial
-    # enumeration says which one this is: no USB device means no firmware.
-    print()
-    try:
-        from serial.tools import list_ports
-        found = list(list_ports.comports())
-        print("        serial devices present after flashing:")
-        if not found:
-            print("          (none)")
-        for pi in found:
-            print("          %-8s vid=%s pid=%s  %s"
-                  % (pi.device,
-                     ("%04X" % pi.vid) if pi.vid else "----",
-                     ("%04X" % pi.pid) if pi.pid else "----",
-                     pi.description))
-        if not any(pi.vid == 0x2E8A for pi in found):
-            print("        No 2E8A device at all, so the firmware is not")
-            print("        running -- this is a boot failure, not a display")
-            print("        fault, and the panel is a red herring.")
-        else:
-            print("        A 2E8A device is present but not answering PING,")
-            print("        so the firmware is running and something later in")
-            print("        init is wrong.")
-    except ImportError:
-        pass
+    if method != "swd":
+        print("        unknown Pico flash method: %s" % method)
+        return False
 
-    print()
-    print("        The flashed image is not responding. This board needs a")
-    print("        manual flash: hold BOOTSEL, replug, and drag this file on:")
-    print("          %s" % uf2)
-    print("        Waiting for the board to come back (Ctrl+C to give up) ...")
-    deadline = time.time() + 300.0
-    while time.time() < deadline:
-        time.sleep(1.0)
-        port = find_pico_port()
-        if port:
-            print("        board is back on %s" % port)
-            return True
-    print("        gave up waiting.")
-    return False
+    if elf and flash_pico_swd(elf):
+        return True
+
+    if not elf:
+        print("        no microrender.elf produced for SWD programming.")
+    print("        SWD unavailable or failed; falling back to manual BOOTSEL.")
+    return manual_flash_pico(uf2)
 
 
 def capture_pico(rows, port=None, preset="stress-lace", baud=115200,
-                 flash=False):
-    if flash and not build_and_flash_pico(preset):
+                 flash_method=None):
+    if flash_method and not build_and_flash_pico(preset, flash_method):
         return
     if port is None:
         port = find_pico_port()
@@ -725,12 +864,11 @@ def main(argv):
     while i < len(argv):
         what = argv[i]
         if what == "all":
-            # Everything, unattended: build and flash the Pico rather than
-            # capturing whatever happens to be on it, since a stale image is
-            # the one way this report can be quietly wrong.
+            # Build and program the Pico through the separate SWD probe rather
+            # than rebooting the target through its own USB/BootROM path.
             capture_raylib(rows)
             capture_dos(rows)
-            capture_pico(rows, None, "stress-lace", flash=True)
+            capture_pico(rows, None, "stress-lace", flash_method="swd")
         elif what == "raylib":
             capture_raylib(rows)
         elif what == "dos":
@@ -738,17 +876,21 @@ def main(argv):
         elif what == "pico":
             port = None
             preset = "stress-lace"
-            flash = False
+            flash_method = None
             while i + 1 < len(argv) and argv[i + 1] not in targets:
                 i += 1
                 arg = argv[i]
                 if arg == "flash":
-                    flash = True
+                    flash_method = "swd"
+                elif arg == "picotool":
+                    flash_method = "picotool"
+                elif arg == "manual":
+                    flash_method = "manual"
                 elif arg.upper().startswith("COM") or "/" in arg:
                     port = arg
                 else:
                     preset = arg
-            capture_pico(rows, port, preset, flash=flash)
+            capture_pico(rows, port, preset, flash_method=flash_method)
         else:
             print("unknown target: %s" % what)
             return 1
