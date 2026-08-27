@@ -477,12 +477,23 @@ def build_and_flash_pico(preset):
         if find_pico_port():
             return True
 
-    print("        no MicroRender firmware answered after flashing.")
-    print("        picotool reboots via the watchdog, which restarts the core")
-    print("        without power-cycling the panel or the second core. If the")
-    print("        display is white, unplug the board, plug it back in, and")
-    print("        capture without the flash step:")
-    print("          python scripts\\mr_capture.py pico")
+    # Known unresolved: on at least one board, a picotool-flashed image comes
+    # up with a white display and never runs, while the same UF2 dragged on in
+    # BOOTSEL works every time. Rather than fail the whole capture, ask for the
+    # manual step and wait for the board to come back.
+    print()
+    print("        The flashed image is not responding. This board needs a")
+    print("        manual flash: hold BOOTSEL, replug, and drag this file on:")
+    print("          %s" % uf2)
+    print("        Waiting for the board to come back (Ctrl+C to give up) ...")
+    deadline = time.time() + 300.0
+    while time.time() < deadline:
+        time.sleep(1.0)
+        port = find_pico_port()
+        if port:
+            print("        board is back on %s" % port)
+            return True
+    print("        gave up waiting.")
     return False
 
 

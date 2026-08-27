@@ -192,10 +192,15 @@ peripheral the new image is about to configure. Dragging a UF2 on in BOOTSEL is
 a genuine cold start and does not have the problem, which is why an automatic
 flash could come up with a white display where a manual one did not.
 
-The firmware now aborts every DMA channel and parks core 1 before touching any
-peripheral, so a warm boot behaves like a cold one. If a board flashed before
-that change still misbehaves, power-cycle it and capture without the flash
-step:
+The firmware aborts every DMA channel and parks core 1 before touching any
+peripheral, which should make a warm boot equivalent to a cold one. On at least
+one board it does not: a `picotool`-flashed image still comes up with a white
+display, while the same UF2 dragged on in BOOTSEL works every time. The cause
+is not known.
+
+The harness handles it rather than failing: if the flashed image does not
+answer, it prints the UF2 path, asks for a manual BOOTSEL flash, and waits for
+the board to come back before continuing. To skip flashing entirely:
 
 ```powershell
 python scripts\mr_capture.py pico

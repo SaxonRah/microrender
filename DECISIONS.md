@@ -273,7 +273,7 @@ itself.
 
 ---
 
-## 8. Warm boots are not cold boots
+## 8. Warm boots are not cold boots (unresolved)
 
 **Observed.** A board flashed with `picotool load -f -x` came up with a white
 display and stayed there, twice. Dragging the same UF2 on manually in BOOTSEL
@@ -286,14 +286,31 @@ configure. In this configuration core 1 owns the panel, so the incoming
 firmware initialises a display that something else is still driving. A UF2 drag
 is a real cold start, which is why it never showed the fault.
 
-**Fix.** Abort every DMA channel and reset core 1 before any peripheral setup.
-On a cold boot there is nothing to abort and it costs microseconds; on a warm
-boot it makes the machine look like it was just powered on.
+**Attempted fix, which did not work.** Abort every DMA channel and reset core 1
+before any peripheral setup, so a warm boot starts from the same state as a
+cold one. The code is in both Pico frontends and runs before anything else. It
+made no difference: the board still comes up white after `picotool load -x` and
+still needs a manual BOOTSEL flash.
 
-**Worth generalising.** Any firmware reachable by watchdog reboot, USB reset
-interface, or `picotool` inherits this, and the symptom appears at flash time
-rather than at run time -- so it reads as a bad flash rather than as a missing
-assumption about initial state.
+**So the mechanism above is wrong, or incomplete.** Stale DMA and a stale core 1
+are not what is breaking it, because the incoming image now clears both before
+touching a peripheral and the symptom is unchanged. The DMA abort is kept as
+hygiene -- it is correct regardless -- but it is not a fix and is not presented
+as one.
+
+**Status: unresolved.** What is known: it reproduces on `picotool load -f -x`,
+it never happens on a manual BOOTSEL flash of the same UF2, and clearing DMA
+and core 1 early does not help. The obvious next experiment is to flash with
+`MR_PICO_PRESENT_CORE1=OFF`, which would say whether core 1 is involved at all
+rather than assuming it from the fact that it owns the panel.
+
+The capture harness no longer treats this as fatal: it asks for the manual
+flash and waits for the board to reappear.
+
+**Worth recording even unresolved.** The symptom appears at flash time rather
+than run time, so it reads as a bad flash rather than as a difference between
+warm and cold starts. That framing is what made the first two attempts look
+plausible.
 
 ---
 
