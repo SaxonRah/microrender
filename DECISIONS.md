@@ -298,11 +298,29 @@ touching a peripheral and the symptom is unchanged. The DMA abort is kept as
 hygiene -- it is correct regardless -- but it is not a fix and is not presented
 as one.
 
-**Status: unresolved.** What is known: it reproduces on `picotool load -f -x`,
-it never happens on a manual BOOTSEL flash of the same UF2, and clearing DMA
-and core 1 early does not help. The obvious next experiment is to flash with
-`MR_PICO_PRESENT_CORE1=OFF`, which would say whether core 1 is involved at all
-rather than assuming it from the fact that it owns the panel.
+**Core 1 ruled out.** Flashing `stress-visible`, which sets
+`MR_PICO_PRESENT_CORE1=OFF`, white-screens the same way. So the presenter is not
+involved and the fault is somewhere in the init path every Pico build shares.
+
+**Status: unresolved.** Established so far:
+
+- reproduces on `picotool load -f -x`, every time
+- never happens on a manual BOOTSEL flash of the same UF2, every time
+- aborting DMA and resetting core 1 before any peripheral setup does not help
+- happens with core 1 disabled entirely
+
+The remaining difference between the two paths is that a manual BOOTSEL flash
+involves unplugging the board, which power-cycles the ILI9341 module as well as
+the RP2350. Nothing in the `picotool` path removes power from the panel. That
+makes the panel's own state the leading suspect rather than anything in the
+firmware -- and it would explain why every firmware-side fix has missed.
+
+The decisive question is whether the display's RST line is actually wired to
+`MR_LCD_PIN_RST`. If it is not connected -- tied high, or to the board's own
+reset -- then the panel is only ever truly reset by removing power, the driver's
+reset sequence is a no-op, and a warm-booted panel keeps whatever state the
+previous image left it in. That is a wiring question, not a code question, and
+it should be answered before any more firmware changes are attempted.
 
 The capture harness no longer treats this as fatal: it asks for the manual
 flash and waits for the board to reappear.
