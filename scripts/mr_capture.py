@@ -374,15 +374,54 @@ def find_picotool():
     return None
 
 
+def pico_ping(port, baud=115200, timeout=2.0):
+    """True when a MicroRender firmware answers on this port.
+
+    Vendor ID alone is not enough to identify the board: a debug probe
+    enumerates under the same 2E8A, so picking the first match lands on the
+    probe as often as on the target. The firmware answers PING with a MRPICO1
+    banner, so ask rather than guess.
+    """
+    try:
+        import serial
+    except ImportError:
+        return False
+    try:
+        with serial.Serial(port, baud, timeout=timeout) as ser:
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+            ser.write(b"PING\n")
+            ser.flush()
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                line = ser.readline()
+                if not line:
+                    break
+                if b"MRPICO1" in line:
+                    return True
+                # A running build prints metrics continuously, which is just as
+                # good an identification as the banner.
+                if line.startswith(b"stress ") or line.startswith(b"game "):
+                    return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def find_pico_port():
-    """The Pico's USB CDC port, by vendor ID rather than by guessing COM5."""
+    """The port a MicroRender firmware is actually answering on."""
     try:
         from serial.tools import list_ports
     except ImportError:
         return None
-    for p in list_ports.comports():
-        if p.vid == 0x2E8A:
-            return p.device
+    ports = list(list_ports.comports())
+    # Prefer the right vendor, but try everything rather than give up: a board
+    # behind a USB hub or a generic CDC driver may not report a vid at all.
+    ordered = ([p.device for p in ports if p.vid == 0x2E8A] +
+               [p.device for p in ports if p.vid != 0x2E8A])
+    for dev in ordered:
+        if pico_ping(dev):
+            return dev
     return None
 
 
@@ -437,7 +476,13 @@ def build_and_flash_pico(preset):
         time.sleep(0.5)
         if find_pico_port():
             return True
-    print("        board did not re-enumerate after flashing")
+
+    print("        no MicroRender firmware answered after flashing.")
+    print("        picotool reboots via the watchdog, which restarts the core")
+    print("        without power-cycling the panel or the second core. If the")
+    print("        display is white, unplug the board, plug it back in, and")
+    print("        capture without the flash step:")
+    print("          python scripts\\mr_capture.py pico")
     return False
 
 

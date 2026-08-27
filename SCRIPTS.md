@@ -180,8 +180,19 @@ running board into the bootloader over USB and runs the new image afterwards,
 so the BOOTSEL button is not involved. `picotool` is taken from PATH or from
 the SDK install under `~/.pico-sdk`.
 
-The serial port is found by USB vendor ID (`2E8A`) rather than guessed, so it
-does not need naming.
+The serial port is found by asking rather than guessing: each candidate is sent
+`PING` and the one answering `MRPICO1` is used. Vendor ID alone is not enough,
+because a debug probe enumerates under the same `2E8A` and picking the first
+match lands on the probe as often as on the board.
+
+`picotool` reboots via the watchdog, which restarts the core without
+power-cycling the panel or the second core. If the display comes up white after
+an automatic flash, unplug the board, plug it back in, and capture without the
+flash step:
+
+```powershell
+python scripts\mr_capture.py pico
+```
 
 Pico capture talks to whatever firmware happens to be flashed, which is not
 necessarily what you last built -- and a screenshot filed under the wrong label
