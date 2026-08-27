@@ -223,6 +223,7 @@ static void lace_core1_main(void);
 #endif
 
 static mr_timestep_t stress_step;
+static unsigned long stress_sim_ticks;
 static gfx_color_t tile_buffer_a[MR_SCREEN_W * MR_TILE_H];
 #if MR_LACE_CORE1 ||                                                           \
     !(((MR_STRESS_PICO_FLUSH_MODE == 5) ||                                     \
@@ -1274,8 +1275,10 @@ void mr_pico_stress_demo_main(void) {
   {
     int steps = mr_timestep_advance(&stress_step,
                                     (unsigned long)stress_time_us());
-    while (steps-- > 0)
+    while (steps-- > 0) {
       mr_stress_tick(&stress);
+      ++stress_sim_ticks;
+    }
   }
   gfx_render_tiled_pipelined(&renderer, tile_buffer_b, draw_stress_scene,
                              &stress, GFX_RGB565_BLACK, 0u);
@@ -1316,8 +1319,10 @@ void mr_pico_stress_demo_main(void) {
     {
       int steps = mr_timestep_advance(&stress_step,
                                       (unsigned long)stress_time_us());
-      while (steps-- > 0)
+      while (steps-- > 0) {
         mr_stress_tick(&stress);
+        ++stress_sim_ticks;
+      }
     }
 #if MR_STRESS_PICO_FLUSH_MODE == 7
     /* Deliberately unoptimized reference path: render, synchronously flush,
@@ -1358,6 +1363,7 @@ void mr_pico_stress_demo_main(void) {
       unsigned long dirty_pct10;
       uint32_t delta_ms;
       uint32_t total_ms;
+      unsigned long sim_hz10;
 
       frames = frame_counter - last_fps_frame;
       delta_ms = (uint32_t)(now - last_fps_ms);
@@ -1365,6 +1371,12 @@ void mr_pico_stress_demo_main(void) {
       fps10 = delta_ms ? (frames * 10000ul) / (unsigned long)delta_ms : 0ul;
       avg_fps10 =
           total_ms ? (frame_counter * 10000ul) / (unsigned long)total_ms : 0ul;
+      /* Simulation rate, computed exactly like the frame rate so the two are
+         directly comparable. This is the number that should agree across DOS,
+         Raylib and Pico; the frame rate is expected not to. */
+      sim_hz10 = total_ms
+                     ? (stress_sim_ticks * 10000ul) / (unsigned long)total_ms
+                     : 0ul;
       mr_stress_set_fps10(&stress, fps10, avg_fps10);
 
       frame_us = stress_stat_window_frames
@@ -1396,7 +1408,8 @@ void mr_pico_stress_demo_main(void) {
           "stress frame=%lu fps=%lu.%lu avg=%lu.%lu spr=%lu vis=%lu b=%lu "
           "d=%lu rn=%lu px=%lu col=%lu/%lu mode=%d fixed=%d tri=%d frameUs=%lu "
           "cpuUs=%lu flushUs=%lu sentKB=%lu dirty=%lu.%lu%% spans=%lu sys=%lu "
-          "peri=%lu spi=%u serial=%d core1=%d lace=%d phases=%d\n",
+          "peri=%lu spi=%u serial=%d core1=%d lace=%d phases=%d "
+          "sim_ticks=%lu sim_hz=%lu.%lu\n",
           frame_counter, fps10 / 10ul, fps10 % 10ul, avg_fps10 / 10ul,
           avg_fps10 % 10ul, m.sprite_count, m.sprites_visible, m.bucket_items,
           m.sprites_drawn, m.rle_runs_drawn, m.rle_pixels_copied,
@@ -1407,7 +1420,8 @@ void mr_pico_stress_demo_main(void) {
           (unsigned long)clock_get_hz(clk_sys),
           (unsigned long)clock_get_hz(clk_peri), (unsigned)lcd.spi_baud_hz,
           MR_STRESS_PICO_SERIAL, MR_LACE_CORE1,
-          MR_STRESS_PICO_LACE_BLOCK_H, MR_STRESS_LACE_PHASES);
+          MR_STRESS_PICO_LACE_BLOCK_H, MR_STRESS_LACE_PHASES,
+          stress_sim_ticks, sim_hz10 / 10ul, sim_hz10 % 10ul);
 
       last_fps_frame = frame_counter;
       last_fps_ms = now;

@@ -103,6 +103,10 @@ static gfx_color_t __huge *dos_raw_frame;
  * seeking is needed; x is always 0 and w always the full width for this
  * renderer's tiling.
  */
+/* 0 not requested, 1 written, -1 failed. Reported after the video
+   mode is restored: anything printed while Mode X is active goes to
+   pixels rather than to the screen. */
+static int dos_capture_status = 0;
 static FILE *dos_shot_file = 0;
 static int dos_shot_failed = 0;
 
@@ -465,10 +469,16 @@ static void dos_parse_options(int argc, char **argv, dos_options_t *opt) {
                i + 1 < argc) {
       ++i;
       opt->shot_path = argv[i];
+    } else if (arg_starts_with(argv[i], "/shot=") ||
+               arg_starts_with(argv[i], "-shot=")) {
+      opt->shot_path = argv[i] + 6;
     } else if ((arg_eq(argv[i], "/report") || arg_eq(argv[i], "-report")) &&
                i + 1 < argc) {
       ++i;
       opt->report_path = argv[i];
+    } else if (arg_starts_with(argv[i], "/report=") ||
+               arg_starts_with(argv[i], "-report=")) {
+      opt->report_path = argv[i] + 8;
     } else if (arg_eq(argv[i], "/wait") || arg_eq(argv[i], "-wait")) {
       opt->wait_key_on_exit = 1;
     } else if (arg_eq(argv[i], "/vsync") || arg_eq(argv[i], "-vsync")) {
@@ -597,8 +607,11 @@ static int dos_run_shared_game(const dos_options_t *opt) {
      state into the tile buffer, so it reflects the last simulated frame
      regardless of which present mode was in use. */
   if (opt->shot_path)
-    (void)dos_write_shot(opt->shot_path, &dos_renderer, dos_draw_game_scene,
-                         &dos_game);
+    dos_capture_status =
+        dos_write_shot(opt->shot_path, &dos_renderer, dos_draw_game_scene,
+                       &dos_game)
+            ? 1
+            : -1;
   if (opt->report_path) {
     unsigned long end_us = dos_vga_micros();
     (void)dos_write_report(opt->report_path, opt, frame, dos_sim_ticks,
@@ -640,6 +653,16 @@ int dos_app_main(int argc, char **argv) {
   rc = dos_run_shared_game(&opt);
 
   dos_leave_video();
+
+  /* Now that text mode is back, say whether the capture worked. Silence here
+     is what made a failed fopen look like the whole run had done nothing. */
+  if (dos_capture_status > 0) {
+    printf("capture: wrote %s\n", opt.shot_path);
+  } else if (dos_capture_status < 0) {
+    printf("capture: FAILED to write \"%s\" - check the filename reached the\n"
+           "         program unquoted, and that the drive is writable.\n",
+           opt.shot_path ? opt.shot_path : "(null)");
+  }
 
 #if MR_DOS_PRESENT_MODE == 0
   hfree(dos_raw_frame);

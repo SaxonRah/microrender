@@ -246,8 +246,10 @@ def capture_dos(rows, frames=900):
 
     env = dict(os.environ)
     env["MR_DOSBOX_NOPAUSE"] = "1"
+    # =value forms: a single token each, so nothing depends on how the runner
+    # or DOS splits a two-token option.
     cmd = [os.path.join(ROOT, "mr.bat"), "run", "dos", "/auto",
-           "/frames", str(frames), "/shot", "dos.shot", "/report", "dos.txt"]
+           "/frames=%d" % frames, "/shot=dos.shot", "/report=dos.txt"]
     print("dos: running under DOSBox (cycles=%s)"
           % env.get("MR_DOSBOX_CYCLES", "max"))
     try:
@@ -302,6 +304,13 @@ def capture_pico(rows, port, preset="stress-lace", baud=115200):
             if fps:
                 fields["fps_avg"] = "%.2f" % (sum(fps) / len(fps))
                 fields["fps_samples"] = str(len(fps))
+            # sim_hz arrives straight from the firmware, computed there against
+            # the same elapsed time as the frame rate. Without it a Pico row
+            # cannot be compared with a DOS or Raylib row, which is the whole
+            # point of the report.
+            if "sim_hz" not in fields:
+                print("        note: firmware predates sim_hz; reflash to "
+                      "compare simulation rates")
 
         if not fields:
             print("pico: no metrics line seen. Is this a serial=ON build, and\n"
@@ -382,9 +391,9 @@ def write_reports(rows):
     with open(os.path.join(OUT, "report.md"), "w") as f:
         f.write("# Capture report\n\n")
         f.write("Generated %s\n\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
-        show = [k for k in ("platform", "case", "fps_avg", "sim_hz", "frames",
-                            "sim_ticks", "cpuUs", "flushUs", "sentKB") if
-                any(k in r for r in rows)]
+        show = [k for k in ("platform", "case", "fps_avg", "fps", "sim_hz",
+                            "sim_ticks", "frames", "cycles", "cpuUs",
+                            "flushUs", "sentKB") if any(k in r for r in rows)]
         f.write("| " + " | ".join(show) + " |\n")
         f.write("|" + "|".join([" --- "] * len(show)) + "|\n")
         for r in rows:

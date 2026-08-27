@@ -97,7 +97,11 @@ goto collect_dos_args
 set "DOSARGS="
 :collect_dos_args_loop
 if "%~1"=="" goto launch
-set "DOSARGS=!DOSARGS! "%~1""
+rem %~1 already strips surrounding quotes; re-adding them puts literal quote
+rem characters into the DOS command tail, where they end up inside argv values.
+rem A path like "dos.shot" is then not a valid DOS filename and fopen fails.
+rem DOS arguments do not contain spaces, so unquoted is both safe and correct.
+set "DOSARGS=!DOSARGS! %~1"
 shift /1
 goto collect_dos_args_loop
 
