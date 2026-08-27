@@ -298,6 +298,15 @@ touching a peripheral and the symptom is unchanged. The DMA abort is kept as
 hygiene -- it is correct regardless -- but it is not a fix and is not presented
 as one.
 
+**The firmware is not the problem.** After a `picotool` flash the board answers
+`PING` on USB, streams metrics, reports the correct clocks and pixel format, and
+produces a valid screenshot. Only the physical panel is white. The screenshot is
+re-rendered from the framebuffer rather than read back from the display, which
+is why the capture is correct while the display is not.
+
+That rules out a boot failure and narrows this to the panel initialisation
+specifically, with everything else in the image demonstrably working.
+
 **Core 1 ruled out.** Flashing `stress-visible`, which sets
 `MR_PICO_PRESENT_CORE1=OFF`, white-screens the same way. So the presenter is not
 involved and the fault is somewhere in the init path every Pico build shares.
@@ -315,12 +324,27 @@ the RP2350. Nothing in the `picotool` path removes power from the panel. That
 makes the panel's own state the leading suspect rather than anything in the
 firmware -- and it would explain why every firmware-side fix has missed.
 
-The decisive question is whether the display's RST line is actually wired to
-`MR_LCD_PIN_RST`. If it is not connected -- tied high, or to the board's own
-reset -- then the panel is only ever truly reset by removing power, the driver's
-reset sequence is a no-op, and a warm-booted panel keeps whatever state the
-previous image left it in. That is a wiring question, not a code question, and
-it should be answered before any more firmware changes are attempted.
+RST is wired to GPIO 8 on this board, so the driver's reset sequence does reach
+the panel. The sequence itself is unremarkable: RST low 30 ms, high 120 ms,
+`SWRESET`, 150 ms, `SLPOUT`, 150 ms.
+
+So the panel is being reset and still does not come up, on a warm boot only.
+The remaining candidates are timing rather than logic -- an ILI9341 whose supply
+never dipped may need longer than a cold one to accept a reset, or may need the
+reset held longer than 30 ms to actually take.
+
+**Practical impact: none on the capture.** The screenshot is rendered rather
+than read back, so the report is correct regardless. This costs one manual
+flash per capture run and nothing else, which is why it is being left
+documented rather than chased further.
+
+**Next experiment, if it is ever worth it.** The firmware is alive and already
+has a serial command interface, so a command that re-runs `panel_init()` on
+demand would settle it: if a later re-init fixes the white screen, the reset
+sequence works and the problem is that it runs too early after a warm boot. If
+it does not, the panel is in a state no reset clears without a power cycle.
+That is one instrumented test rather than another guess, and it is the point at
+which to resume.
 
 The capture harness no longer treats this as fatal: it asks for the manual
 flash and waits for the board to reappear.
