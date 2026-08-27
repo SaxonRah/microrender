@@ -238,7 +238,10 @@ def capture_dos(rows, frames=900):
         print("       .\\mr.bat build dos mode=both tile=16 vsync=0")
         return
 
-    shot = os.path.join(dosroot, "dos.shot")
+    # 8.3 filenames. "dos.shot" has a four-character extension, so DOS writes
+    # DOS.SHO and anything waiting on the requested name waits forever. Ask for
+    # a name that survives the filesystem in the first place.
+    shot = os.path.join(dosroot, "dos.bin")
     rep = os.path.join(dosroot, "dos.txt")
     for stale in (shot, rep):
         if os.path.exists(stale):
@@ -249,7 +252,7 @@ def capture_dos(rows, frames=900):
     # =value forms: a single token each, so nothing depends on how the runner
     # or DOS splits a two-token option.
     cmd = [os.path.join(ROOT, "mr.bat"), "run", "dos", "/auto",
-           "/frames=%d" % frames, "/shot=dos.shot", "/report=dos.txt"]
+           "/frames=%d" % frames, "/shot=dos.bin", "/report=dos.txt"]
     print("dos: running under DOSBox (cycles=%s); waiting for the capture ..."
           % env.get("MR_DOSBOX_CYCLES", "max"))
     print("        %s" % " ".join(cmd[1:]))
@@ -291,12 +294,16 @@ def capture_dos(rows, frames=900):
         # is whatever got mounted as C:. If that is not the directory being
         # watched, the file is still on disk somewhere -- find it and say so
         # rather than reporting nothing at all.
-        for alt_dir in (dist, ROOT, os.path.join(ROOT, "microrender_dos")):
-            alt = os.path.join(alt_dir, "dos.shot")
-            if os.path.exists(alt):
-                print("        found the capture in %s instead" % alt_dir)
-                shot = alt
-                rep = os.path.join(alt_dir, "dos.txt")
+        for alt_dir in (dosroot, dist, ROOT,
+                        os.path.join(ROOT, "microrender_dos")):
+            for alt_name in ("dos.bin", "DOS.BIN", "dos.sho", "DOS.SHO"):
+                alt = os.path.join(alt_dir, alt_name)
+                if os.path.exists(alt):
+                    print("        found the capture at %s" % alt)
+                    shot = alt
+                    rep = os.path.join(alt_dir, "dos.txt")
+                    break
+            if os.path.exists(shot):
                 break
 
     if not os.path.exists(shot):
@@ -309,11 +316,11 @@ def capture_dos(rows, frames=900):
             print("          cannot list: %s" % exc)
         print("        Run it by hand and read the DOSBox window before it")
         print("        closes; the frontend prints whether it wrote the file:")
-        print("       .\\mr.bat run dos /auto /frames=%d /shot=dos.shot"
+        print("       .\\mr.bat run dos /auto /frames=%d /shot=dos.bin"
               % frames)
         return
 
-    dest = os.path.join(OUT, "dos-game.shot")
+    dest = os.path.join(OUT, "dos-game.bin")
     os.replace(shot, dest)
     fields = read_report(rep)
     if os.path.exists(rep):

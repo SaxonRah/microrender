@@ -213,6 +213,11 @@ complete frame, and 150 KiB is more than a real-mode program should allocate
 just to save a picture. Swapping the flush callback re-renders the scene into
 the existing tile buffer and writes each strip as it is produced.
 
+Capture filenames must fit DOS 8.3. `dos.shot` has a four-character extension,
+so DOS silently writes `DOS.SHO` instead, and anything waiting on the requested
+name waits forever while the file sits on disk under a different one. The
+frontend says so when the name it was given cannot survive the filesystem.
+
 DOS capture goes through `mr.bat run dos`, so it reuses the runner's DOSBox
 config -- `machine=vgaonly` keeps Mode X on real VGA emulation rather than an
 SVGA compatibility layer -- and mounts `dosroot` as C:. `MR_DOSBOX_NOPAUSE=1`

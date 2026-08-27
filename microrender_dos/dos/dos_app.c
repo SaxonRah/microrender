@@ -106,6 +106,31 @@ static gfx_color_t __huge *dos_raw_frame;
 /* 0 not requested, 1 written, -1 failed. Reported after the video
    mode is restored: anything printed while Mode X is active goes to
    pixels rather than to the screen. */
+/* True when a filename fits DOS 8.3: up to eight characters, optionally a
+   dot and up to three more. Anything longer is silently truncated on write. */
+static int dos_name_is_8_3(const char *name) {
+  int stem = 0;
+  int ext = 0;
+  int seen_dot = 0;
+
+  if (!name)
+    return 0;
+
+  while (*name) {
+    if (*name == '.') {
+      if (seen_dot)
+        return 0;
+      seen_dot = 1;
+    } else if (seen_dot) {
+      ++ext;
+    } else {
+      ++stem;
+    }
+    ++name;
+  }
+  return stem >= 1 && stem <= 8 && ext <= 3;
+}
+
 static int dos_capture_status = 0;
 static FILE *dos_shot_file = 0;
 static int dos_shot_failed = 0;
@@ -657,7 +682,14 @@ int dos_app_main(int argc, char **argv) {
   /* Now that text mode is back, say whether the capture worked. Silence here
      is what made a failed fopen look like the whole run had done nothing. */
   if (dos_capture_status > 0) {
-    printf("capture: wrote %s\n", opt.shot_path);
+    /* Say what DOS actually created, not what was asked for. A name like
+       dos.shot is silently truncated to DOS.SHO by the 8.3 filesystem, and a
+       script waiting on the requested name waits forever while the capture
+       sits on disk under a different one. */
+    printf("capture: wrote %s", opt.shot_path);
+    if (!dos_name_is_8_3(opt.shot_path))
+      printf("  (NOTE: 8.3 truncation - check the actual filename)");
+    printf("\n");
   } else if (dos_capture_status < 0) {
     printf("capture: FAILED to write \"%s\" - check the filename reached the\n"
            "         program unquoted, and that the drive is writable.\n",
