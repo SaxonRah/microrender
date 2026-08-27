@@ -250,7 +250,7 @@ def capture_dos(rows, frames=900):
     # or DOS splits a two-token option.
     cmd = [os.path.join(ROOT, "mr.bat"), "run", "dos", "/auto",
            "/frames=%d" % frames, "/shot=dos.shot", "/report=dos.txt"]
-    print("dos: running under DOSBox (cycles=%s)"
+    print("dos: running under DOSBox (cycles=%s); waiting for the capture ..."
           % env.get("MR_DOSBOX_CYCLES", "max"))
     try:
         subprocess.run(cmd, cwd=ROOT, env=env, timeout=300,
@@ -259,11 +259,27 @@ def capture_dos(rows, frames=900):
         print("        could not run: %s" % exc)
         return
 
-    # The runner blocks on DOSBox, but if a future change to it regresses that,
-    # waiting briefly here turns a confusing "no capture" into a slow success.
-    for _ in range(20):
+    # Do not trust the runner to have blocked. DOSBox is a GUI-subsystem
+    # executable, and depending on the Windows shell and DOSBox build, the
+    # launcher can return while it is still running -- so subprocess.run
+    # completing says nothing about whether the program has run yet.
+    #
+    # Wait for the artifact instead, and wait for it to stop growing: the file
+    # appears when the frontend opens it and is only complete once the last
+    # tile has been written.
+    deadline = time.time() + 180.0
+    stable = 0
+    last = -1
+    while time.time() < deadline:
         if os.path.exists(shot):
-            break
+            size = os.path.getsize(shot)
+            if size == last and size > 0:
+                stable += 1
+                if stable >= 3:
+                    break
+            else:
+                stable = 0
+                last = size
         time.sleep(0.5)
 
     if not os.path.exists(shot):

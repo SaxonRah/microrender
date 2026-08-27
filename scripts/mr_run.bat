@@ -192,7 +192,9 @@ rem
 rem start /wait blocks until the process exits and still propagates its exit
 rem code. The empty "" is the window title, which start requires when the first
 rem quoted argument is the program path.
-start /wait "" "%MR_DOSBOX%" -conf "%CONF%"
+start "" /wait "%MR_DOSBOX%" -conf "%CONF%"
 set "RC=%ERRORLEVEL%"
+rem Only remove the config once DOSBox has exited. Deleting it while DOSBox is
+rem still reading produces a silent, confusing failure.
 del "%CONF%" >nul 2>nul
 exit /b %RC%
