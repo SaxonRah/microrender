@@ -320,6 +320,7 @@ static uint32_t stress_raster_us_accum;
 static int stress_measure_draw;
 static unsigned long stress_stat_window_frames;
 static uint32_t stress_full_flush_begin_us;
+static int stress_async_flush_active;
 static unsigned long stress_diag_fps10;
 static unsigned long stress_diag_avg_fps10;
 static unsigned long stress_diag_frame_us;
@@ -798,8 +799,114 @@ static void stress_dirtyrect_present(gfx_renderer_t *r, void *user) {
 #endif
 }
 
+#ifndef MR_STRESS_LACE_PHASES
+#define MR_STRESS_LACE_PHASES 2
+#endif
+
+#if MR_STRESS_PICO_FLUSH_MODE == 6
+/*
+ * Tiled lace: one selected row group per render tile.
+ *
+ * The tile height is one complete lace period (block_h * phases).  That makes
+ * the selected rows contiguous, so one CASET/RASET/RAMWR + one DMA transfer is
+ * enough for each tile.  gfx_render_tiled_pipelined() then renders the next
+ * tile into the other buffer while this DMA is running.
+ */
+static int stress_lace_phase_count(void) {
+  return (MR_STRESS_LACE_PHASES > 0) ? MR_STRESS_LACE_PHASES : 1;
+}
+
+static int stress_lace_phase_for_frame(void) {
+  int phases = stress_lace_phase_count();
+  return (phases <= 1)
+             ? 0
+             : (int)(frame_counter % (unsigned long)phases);
+}
+
+static int stress_lace_tile_span(int tile_y, int tile_h, int *send_y,
+                                 int *send_h, int *pixel_row) {
+  int block_h = MR_STRESS_PICO_LACE_BLOCK_H;
+  int phases = stress_lace_phase_count();
+  int phase = stress_lace_phase_for_frame();
+  int period;
+  int base;
+  int sy;
+  int ey;
+  int tile_end;
+
+  if (!send_y || !send_h || !pixel_row || tile_h <= 0)
+    return 0;
+
+  if (block_h < 1)
+    block_h = 1;
+  if (block_h > MR_VIEW_H)
+    block_h = MR_VIEW_H;
+
+  period = block_h * phases;
+  if (period < block_h)
+    period = block_h;
+
+  tile_end = tile_y + tile_h;
+  base = (tile_y / period) * period;
+  sy = base + phase * block_h;
+
+  while (sy + block_h <= tile_y)
+    sy += period;
+
+  if (sy >= tile_end || sy >= MR_VIEW_H)
+    return 0;
+
+  ey = sy + block_h;
+  if (sy < tile_y)
+    sy = tile_y;
+  if (ey > tile_end)
+    ey = tile_end;
+  if (ey > MR_VIEW_H)
+    ey = MR_VIEW_H;
+  if (ey <= sy)
+    return 0;
+
+  *send_y = sy;
+  *send_h = ey - sy;
+  *pixel_row = sy - tile_y;
+  return 1;
+}
+
+static unsigned long stress_lace_rows_for_phase(int phase) {
+  int block_h = MR_STRESS_PICO_LACE_BLOCK_H;
+  int phases = stress_lace_phase_count();
+  int period;
+  int y;
+  unsigned long rows = 0ul;
+
+  if (block_h < 1)
+    block_h = 1;
+  if (block_h > MR_VIEW_H)
+    block_h = MR_VIEW_H;
+
+  if (phase < 0)
+    phase = 0;
+  if (phases <= 1)
+    phase = 0;
+  else
+    phase %= phases;
+
+  period = block_h * phases;
+  for (y = phase * block_h; y < MR_VIEW_H; y += period) {
+    int h = block_h;
+    if (y + h > MR_VIEW_H)
+      h = MR_VIEW_H - y;
+    if (h > 0)
+      rows += (unsigned long)h;
+  }
+  return rows;
+}
+#endif
+
 static void stress_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,
                                const gfx_color_t *pixels, void *user) {
+  stress_async_flush_active = 0;
+
   if (!stress_present_this_frame) {
     stress_null_flush(r, x, y, w, h, pixels, user);
     return;
@@ -822,19 +929,43 @@ static void stress_flush_begin(gfx_renderer_t *r, int x, int y, int w, int h,
   }
 #endif
 
-  if (w > 0 && h > 0)
-    stress_flush_bytes += (unsigned long)w * (unsigned long)h * 2ul;
+#if MR_STRESS_PICO_FLUSH_MODE == 6
+  if (MR_TILE_H < MR_VIEW_H) {
+    int send_y;
+    int send_h;
+    int pixel_row;
+
+    /*
+     * Tiled lace presets deliberately use exactly one phase period per tile.
+     * Keep a runtime guard as well: if somebody builds an incompatible custom
+     * tile size, refuse that tile rather than DMA from the wrong rows.
+     */
+    if (MR_TILE_H !=
+        (MR_STRESS_PICO_LACE_BLOCK_H * stress_lace_phase_count())) {
+      return;
+    }
+
+    if (!stress_lace_tile_span(y, h, &send_y, &send_h, &pixel_row))
+      return;
+
+    pixels += (long)pixel_row * (long)w;
+    y = send_y;
+    h = send_h;
+  }
+#endif
+
+  if (w <= 0 || h <= 0)
+    return;
+
+  stress_flush_bytes += (unsigned long)w * (unsigned long)h * 2ul;
   stress_full_flush_begin_us = stress_time_us();
   mr_pico_ili9341_flush_begin(r, x, y, w, h, pixels, user);
+  stress_async_flush_active = 1;
 }
 
 static void stress_flush_wait(gfx_renderer_t *r, void *user) {
-  if (!stress_present_this_frame) {
-    (void)r;
-    (void)user;
-    return;
-  }
-  if (stress_dirty_this_frame) {
+  if (!stress_present_this_frame || stress_dirty_this_frame ||
+      !stress_async_flush_active) {
     (void)r;
     (void)user;
     return;
@@ -843,6 +974,7 @@ static void stress_flush_wait(gfx_renderer_t *r, void *user) {
   mr_pico_ili9341_flush_wait(r, user);
   stress_flush_us_accum +=
       (uint32_t)(stress_time_us() - stress_full_flush_begin_us);
+  stress_async_flush_active = 0;
 }
 
 static void stress_reset_timing(void) {
@@ -858,6 +990,7 @@ static void stress_reset_timing(void) {
   stress_update_us_accum = 0u;
   stress_raster_us_accum = 0u;
   stress_measure_draw = 0;
+  stress_async_flush_active = 0;
   stress_stat_window_frames = 0ul;
   stress_diag_fps10 = 0ul;
   stress_diag_avg_fps10 = 0ul;
@@ -941,16 +1074,11 @@ static void stress_render_fullframe_dirtyrect(gfx_color_t *buffer) {
 #endif
 }
 
-#ifndef MR_STRESS_LACE_PHASES
-#define MR_STRESS_LACE_PHASES 2
-#endif
-
 #if MR_STRESS_PICO_FLUSH_MODE == 6
-/* Send one lace phase. Callable from either core: the renderer argument is
-   unused by the ILI9341 flush, so this touches only the panel and the buffer
-   handed to it. */
+/* Send one complete lace phase from a full-frame buffer. */
 static void stress_lace_send_phase(const gfx_color_t *buffer, int phase) {
   int block_h = MR_STRESS_PICO_LACE_BLOCK_H;
+  int phases = stress_lace_phase_count();
   int y;
   int stride;
 
@@ -959,13 +1087,15 @@ static void stress_lace_send_phase(const gfx_color_t *buffer, int phase) {
   if (block_h > MR_VIEW_H)
     block_h = MR_VIEW_H;
 
-  /* One phase means every row every frame: no interlace, no shimmer, and one
-     window setup instead of thirty. Worth it once the payload is small enough
-     to fit a full frame in the time budget, which is what 12 bpp buys. */
-  stride = (MR_STRESS_LACE_PHASES <= 1) ? block_h : block_h * 2;
-  if (MR_STRESS_LACE_PHASES <= 1)
+  if (phases <= 1)
     phase = 0;
+  else {
+    if (phase < 0)
+      phase = 0;
+    phase %= phases;
+  }
 
+  stride = block_h * phases;
   for (y = phase * block_h; y < MR_VIEW_H; y += stride) {
     int h = block_h;
     if (y + h > MR_VIEW_H)
@@ -1016,43 +1146,38 @@ static void stress_render_fullframe_lace_core1(void) {
      render into the other one. */
   gfx_color_t *buffer = (frame_counter & 1ul) ? tile_buffer_b : tile_buffer_a;
   uint32_t flush_t0;
+  int phase = stress_lace_phase_for_frame();
 
   renderer.tile = buffer;
   gfx_begin_tile(&renderer, 0, MR_VIEW_H);
   draw_stress_scene(&renderer, &stress);
 
   /* Whatever is left of the previous frame's transfer after this frame's
-     render is the only part that still stalls core 0. When rasterization is
-     the shorter of the two this converges on pure transfer time. */
+     render is the only part that still stalls core 0. */
   flush_t0 = stress_time_us();
   lace_present_sync();
   stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
 
-  /* sentKB must reflect what actually went down the wire, or the throughput
-     line silently lies once either the phase count or the pixel format
-     changes. */
-  {
-    unsigned long rows =
-        (MR_STRESS_LACE_PHASES <= 1) ? (unsigned long)MR_VIEW_H
-                                     : ((unsigned long)MR_VIEW_H / 2ul);
-    stress_flush_bytes += (unsigned long)MR_SCREEN_W * rows * 2ul;
-  }
-  lace_present_async(buffer, (int)(frame_counter & 1ul));
+  stress_flush_bytes +=
+      (unsigned long)MR_SCREEN_W * stress_lace_rows_for_phase(phase) * 2ul;
+  lace_present_async(buffer, phase);
 }
 #endif
 
 static void stress_render_fullframe_lace(gfx_color_t *buffer) {
 #if MR_STRESS_PICO_FLUSH_MODE == 6
   uint32_t flush_t0;
+  int phase = stress_lace_phase_for_frame();
 
   renderer.tile = buffer;
   gfx_begin_tile(&renderer, 0, MR_VIEW_H);
   draw_stress_scene(&renderer, &stress);
 
   flush_t0 = stress_time_us();
-  stress_lace_send_phase(buffer, (int)(frame_counter & 1ul));
+  stress_lace_send_phase(buffer, phase);
   stress_flush_us_accum += (uint32_t)(stress_time_us() - flush_t0);
-  stress_flush_bytes += (unsigned long)MR_SCREEN_W * (unsigned long)MR_VIEW_H;
+  stress_flush_bytes +=
+      (unsigned long)MR_SCREEN_W * stress_lace_rows_for_phase(phase) * 2ul;
 #else
   (void)buffer;
 #endif

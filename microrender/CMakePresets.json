@@ -145,18 +145,38 @@
     {
       "name": "stress-lace-st7796s",
       "inherits": "game-st7796s",
-      "displayName": "Pico 2: ST7796S 480x320 2-phase temporal row groups",
+      "displayName": "Pico 2: ST7796S 480x320 2-phase tiled DMA-pipelined lace",
       "binaryDir": "${sourceDir}/build-stress-lace-st7796s",
       "cacheVariables": {
         "MR_APP": "STRESS",
         "MR_STRESS_MODE": "lace",
         "MR_STRESS_SPRITES": "512",
-        "MR_TILE_H": "320",
+        "MR_TILE_H": "16",
         "MR_STRESS_LACE_BLOCK_H": "8",
         "MR_STRESS_LACE_PHASES": "2",
         "MR_PICO_SYS_KHZ": "300000",
         "MR_LCD_SPI_BAUD": "75000000",
         "MR_PICO_PRESENT_CORE1": "OFF",
+        "MR_STRESS_PICO_SERIAL": "ON",
+        "MR_PICO_FRAME_PIPELINE": "ON"
+      }
+    },
+    {
+      "name": "stress-lace4-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 4-phase tiled DMA-pipelined lace",
+      "binaryDir": "${sourceDir}/build-stress-lace4-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "lace",
+        "MR_STRESS_SPRITES": "512",
+        "MR_TILE_H": "32",
+        "MR_STRESS_LACE_BLOCK_H": "8",
+        "MR_STRESS_LACE_PHASES": "4",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "75000000",
+        "MR_PICO_PRESENT_CORE1": "OFF",
+        "MR_PICO_FRAME_PIPELINE": "ON",
         "MR_STRESS_PICO_SERIAL": "ON"
       }
     }
@@ -209,6 +229,10 @@
     {
       "name": "stress-lace-st7796s",
       "configurePreset": "stress-lace-st7796s"
+    },
+    {
+      "name": "stress-lace4-st7796s",
+      "configurePreset": "stress-lace4-st7796s"
     }
   ]
 }
