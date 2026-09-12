@@ -35,6 +35,16 @@
 #define MR_ILI9341_MADCTL 0x48u
 #endif
 
+/* Historical driver name retained for compatibility.  The transport and
+ * common DCS commands are also used by the ST7796S panel path. */
+#ifndef MR_LCD_PANEL_ST7796S
+#define MR_LCD_PANEL_ST7796S 0
+#endif
+
+#ifndef MR_LCD_MAX_WIDTH
+#define MR_LCD_MAX_WIDTH 480
+#endif
+
 /* Panel refresh rate (FRMCTR1, 0xB1).
  *
  * The panel scans its own GRAM independently of how fast we write to it. At

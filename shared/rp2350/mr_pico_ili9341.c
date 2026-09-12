@@ -184,6 +184,7 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
   lcd_write_cmd_data(ctx, ILI9341_MADCTL, &data, 1);
   sleep_ms(10);
 
+#if !MR_LCD_PANEL_ST7796S
 #if (MR_ILI9341_FRMCTR1_DIVA != 0x00u) || (MR_ILI9341_FRMCTR1_RTNA != 0x1Bu)
   {
     uint8_t frmctr[2];
@@ -192,6 +193,7 @@ void mr_pico_ili9341_panel_init(mr_pico_ili9341_t *ctx) {
     lcd_write_cmd_data(ctx, ILI9341_FRMCTR1, frmctr, 2);
     sleep_ms(10);
   }
+#endif
 #endif
 
   lcd_write_cmd(ctx, ILI9341_DISPON);
@@ -249,13 +251,13 @@ void mr_pico_ili9341_flush(gfx_renderer_t *r, int x, int y, int w, int h,
 
 void mr_pico_ili9341_fill_screen(mr_pico_ili9341_t *ctx, gfx_color_t color,
                                  int w, int h) {
-  static gfx_color_t line[320];
+  static gfx_color_t line[MR_LCD_MAX_WIDTH];
   int x;
   int y;
   int line_w = w;
 
-  if (line_w > 320)
-    line_w = 320;
+  if (line_w > MR_LCD_MAX_WIDTH)
+    line_w = MR_LCD_MAX_WIDTH;
 
   for (x = 0; x < line_w; ++x)
     line[x] = color;

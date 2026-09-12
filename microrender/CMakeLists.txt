@@ -72,6 +72,18 @@ endif()
 # display / panel
 # ---------------------------------------------------------------------------
 
+set(MR_LCD_PANEL "ILI9341" CACHE STRING "LCD controller: ILI9341 or ST7796S")
+set_property(CACHE MR_LCD_PANEL PROPERTY STRINGS ILI9341 ST7796S)
+string(TOUPPER "${MR_LCD_PANEL}" MR_LCD_PANEL_UPPER)
+if(MR_LCD_PANEL_UPPER STREQUAL "ILI9341")
+    set(MR_LCD_PANEL_ST7796S 0)
+elseif(MR_LCD_PANEL_UPPER STREQUAL "ST7796S")
+    set(MR_LCD_PANEL_ST7796S 1)
+else()
+    message(FATAL_ERROR
+        "MR_LCD_PANEL must be ILI9341 or ST7796S, got '${MR_LCD_PANEL}'")
+endif()
+
 set(MR_SCREEN_W       320      CACHE STRING "Render width in pixels")
 set(MR_SCREEN_H       240      CACHE STRING "Render height in pixels")
 set(MR_TILE_H         240      CACHE STRING "Tile height in rows; equal to MR_SCREEN_H gives one full-screen DMA per frame")
@@ -200,9 +212,14 @@ if(MR_VIEW_H GREATER MR_SCREEN_H)
     message(FATAL_ERROR "MR_VIEW_H (${MR_VIEW_H}) cannot exceed MR_SCREEN_H (${MR_SCREEN_H})")
 endif()
 
-if(NOT MR_SCREEN_W EQUAL 320 OR NOT MR_SCREEN_H EQUAL 240)
+if(MR_SCREEN_W LESS 1 OR MR_SCREEN_H LESS 1)
     message(FATAL_ERROR
-        "MicroRender platform builds are fixed at a 320x240 RGB565 logical target")
+        "MR_SCREEN_W and MR_SCREEN_H must both be positive; got ${MR_SCREEN_W}x${MR_SCREEN_H}")
+endif()
+
+if(MR_TILE_H LESS 1 OR MR_TILE_H GREATER MR_SCREEN_H)
+    message(FATAL_ERROR
+        "MR_TILE_H must be in the range 1..MR_SCREEN_H; got ${MR_TILE_H}")
 endif()
 
 # The raw reference paths intentionally render one complete logical frame and
@@ -335,6 +352,7 @@ target_compile_definitions(microrender PRIVATE
     MR_LCD_PIN_RST=${MR_LCD_PIN_RST}
     MR_LCD_PIN_DC=${MR_LCD_PIN_DC}
     MR_LCD_SPI_BAUD=${MR_LCD_SPI_BAUD}
+    MR_LCD_PANEL_ST7796S=${MR_LCD_PANEL_ST7796S}
     MR_ILI9341_MADCTL=${MR_ILI9341_MADCTL}
     MR_STRESS_LACE_PHASES=${MR_STRESS_LACE_PHASES}
     MR_ILI9341_FRMCTR1_DIVA=${MR_ILI9341_FRMCTR1_DIVA}
@@ -444,5 +462,6 @@ if(MR_APP STREQUAL "STRESS")
 else()
     message(STATUS "MicroRender: game presentation=${MR_GAME_PRESENTATION}")
 endif()
-message(STATUS "MicroRender: ${MR_SCREEN_W}x${MR_SCREEN_H} tile_h=${MR_TILE_H} "
-               "view_h=${MR_VIEW_H} sys=${MR_PICO_SYS_KHZ}kHz spi=${MR_LCD_SPI_BAUD}Hz")
+message(STATUS "MicroRender: panel=${MR_LCD_PANEL} ${MR_SCREEN_W}x${MR_SCREEN_H} "
+               "tile_h=${MR_TILE_H} view_h=${MR_VIEW_H} "
+               "sys=${MR_PICO_SYS_KHZ}kHz spi=${MR_LCD_SPI_BAUD}Hz")

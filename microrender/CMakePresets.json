@@ -89,6 +89,76 @@
         "MR_TILE_H": "16",
         "MR_STRESS_SPRITES": "512"
       }
+    },
+    {
+      "name": "game-st7796s",
+      "inherits": "game",
+      "displayName": "Pico 2: ST7796S 480x320 game demo",
+      "binaryDir": "${sourceDir}/build-game-st7796s",
+      "cacheVariables": {
+        "MR_LCD_PANEL": "ST7796S",
+        "MR_SCREEN_W": "480",
+        "MR_SCREEN_H": "320",
+        "MR_VIEW_H": "320",
+        "MR_TILE_H": "16",
+        "MR_ILI9341_MADCTL": "0xE8"
+      }
+    },
+    {
+      "name": "stress-visible-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 full visible stress",
+      "binaryDir": "${sourceDir}/build-stress-visible-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "visible",
+        "MR_STRESS_SPRITES": "512"
+      }
+    },
+    {
+      "name": "stress-lcdtest-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 LCD transfer test",
+      "binaryDir": "${sourceDir}/build-stress-lcdtest-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "lcdtest",
+        "MR_STRESS_SPRITES": "1",
+        "MR_TILE_H": "16",
+        "MR_STRESS_PICO_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "stress-raw-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 raw full-frame baseline",
+      "binaryDir": "${sourceDir}/build-stress-raw-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "raw",
+        "MR_PICO_FRAME_PIPELINE": "OFF",
+        "MR_TILE_H": "320",
+        "MR_STRESS_SPRITES": "512",
+        "MR_STRESS_PICO_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "stress-lace-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 2-phase temporal row groups",
+      "binaryDir": "${sourceDir}/build-stress-lace-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "lace",
+        "MR_STRESS_SPRITES": "512",
+        "MR_TILE_H": "320",
+        "MR_STRESS_LACE_BLOCK_H": "8",
+        "MR_STRESS_LACE_PHASES": "2",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "75000000",
+        "MR_PICO_PRESENT_CORE1": "OFF",
+        "MR_STRESS_PICO_SERIAL": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -119,6 +189,26 @@
     {
       "name": "stress-dirtyrect",
       "configurePreset": "stress-dirtyrect"
+    },
+    {
+      "name": "game-st7796s",
+      "configurePreset": "game-st7796s"
+    },
+    {
+      "name": "stress-visible-st7796s",
+      "configurePreset": "stress-visible-st7796s"
+    },
+    {
+      "name": "stress-lcdtest-st7796s",
+      "configurePreset": "stress-lcdtest-st7796s"
+    },
+    {
+      "name": "stress-raw-st7796s",
+      "configurePreset": "stress-raw-st7796s"
+    },
+    {
+      "name": "stress-lace-st7796s",
+      "configurePreset": "stress-lace-st7796s"
     }
   ]
 }
