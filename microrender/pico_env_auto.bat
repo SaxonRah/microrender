@@ -6,23 +6,14 @@ setlocal EnableExtensions
 rem SDK path. Preserve override.
 if not "%PICO_SDK_PATH%"=="" goto have_sdk
 
-if exist "%USERPROFILE%\.pico-sdk\sdk\2.2.0\pico_sdk_init.cmake" (
-    set "PICO_SDK_PATH=%USERPROFILE%\.pico-sdk\sdk\2.2.0"
+if exist "%USERPROFILE%\.pico-sdk\sdk\2.3.0\pico_sdk_init.cmake" (
+    set "PICO_SDK_PATH=%USERPROFILE%\.pico-sdk\sdk\2.3.0"
     goto have_sdk
 )
 
-if exist "%USERPROFILE%\.pico-sdk\sdk\2.1.1\pico_sdk_init.cmake" (
-    set "PICO_SDK_PATH=%USERPROFILE%\.pico-sdk\sdk\2.1.1"
-    goto have_sdk
-)
-
-if exist "%USERPROFILE%\.pico-sdk\sdk\2.1.0\pico_sdk_init.cmake" (
-    set "PICO_SDK_PATH=%USERPROFILE%\.pico-sdk\sdk\2.1.0"
-    goto have_sdk
-)
-
-echo ERROR: PICO_SDK_PATH is not set and no Pico SDK was found under:
-echo   %USERPROFILE%\.pico-sdk\sdk
+echo ERROR: Pico SDK 2.3.0 is required and was not found under:
+echo   %USERPROFILE%\.pico-sdk\sdk\2.3.0
+echo Or set PICO_SDK_PATH explicitly to a Pico SDK 2.3.0 checkout.
 exit /b 1
 
 :have_sdk

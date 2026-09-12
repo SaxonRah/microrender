@@ -179,6 +179,57 @@
         "MR_PICO_FRAME_PIPELINE": "ON",
         "MR_STRESS_PICO_SERIAL": "ON"
       }
+    },
+    {
+      "name": "stress-lace5-st7796s",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 5-phase tiled DMA-pipelined lace",
+      "binaryDir": "${sourceDir}/build-stress-lace5-st7796s",
+      "cacheVariables": {
+        "MR_APP": "STRESS",
+        "MR_STRESS_MODE": "lace",
+        "MR_STRESS_SPRITES": "512",
+        "MR_TILE_H": "40",
+        "MR_STRESS_LACE_BLOCK_H": "8",
+        "MR_STRESS_LACE_PHASES": "5",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "75000000",
+        "MR_PICO_PRESENT_CORE1": "OFF",
+        "MR_PICO_FRAME_PIPELINE": "ON",
+        "MR_STRESS_PICO_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "game-st7796s-lace4",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 game, 4-phase temporal DMA pipeline",
+      "binaryDir": "${sourceDir}/build-game-st7796s-lace4",
+      "cacheVariables": {
+        "MR_GAME_PRESENTATION": "lace",
+        "MR_TILE_H": "32",
+        "MR_GAME_LACE_BLOCK_H": "8",
+        "MR_GAME_LACE_PHASES": "4",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "75000000",
+        "MR_PICO_FRAME_PIPELINE": "ON",
+        "MR_PICO_GAME_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "game-st7796s-lace5",
+      "inherits": "game-st7796s",
+      "displayName": "Pico 2: ST7796S 480x320 game, 5-phase temporal DMA pipeline",
+      "binaryDir": "${sourceDir}/build-game-st7796s-lace5",
+      "cacheVariables": {
+        "MR_GAME_PRESENTATION": "lace",
+        "MR_TILE_H": "40",
+        "MR_GAME_LACE_BLOCK_H": "8",
+        "MR_GAME_LACE_PHASES": "5",
+        "MR_PICO_SYS_KHZ": "300000",
+        "MR_LCD_SPI_BAUD": "75000000",
+        "MR_PICO_FRAME_PIPELINE": "ON",
+        "MR_PICO_GAME_SERIAL": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -233,6 +284,18 @@
     {
       "name": "stress-lace4-st7796s",
       "configurePreset": "stress-lace4-st7796s"
+    },
+    {
+      "name": "stress-lace5-st7796s",
+      "configurePreset": "stress-lace5-st7796s"
+    },
+    {
+      "name": "game-st7796s-lace4",
+      "configurePreset": "game-st7796s-lace4"
+    },
+    {
+      "name": "game-st7796s-lace5",
+      "configurePreset": "game-st7796s-lace5"
     }
   ]
 }

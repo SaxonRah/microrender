@@ -4,9 +4,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
+set(sdkVersion 2.3.0)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -57,15 +57,17 @@ if(NOT MR_APP STREQUAL "GAME" AND NOT MR_APP STREQUAL "STRESS")
 endif()
 
 set(MR_GAME_PRESENTATION "pipelined" CACHE STRING
-    "Game presentation: raw or pipelined")
-set_property(CACHE MR_GAME_PRESENTATION PROPERTY STRINGS raw pipelined)
+    "Game presentation: raw, pipelined, or lace")
+set_property(CACHE MR_GAME_PRESENTATION PROPERTY STRINGS raw pipelined lace)
 if(MR_GAME_PRESENTATION STREQUAL "raw")
     set(MR_GAME_PRESENT_MODE 0)
 elseif(MR_GAME_PRESENTATION STREQUAL "pipelined")
     set(MR_GAME_PRESENT_MODE 1)
+elseif(MR_GAME_PRESENTATION STREQUAL "lace")
+    set(MR_GAME_PRESENT_MODE 2)
 else()
     message(FATAL_ERROR
-        "MR_GAME_PRESENTATION must be raw or pipelined, got '${MR_GAME_PRESENTATION}'")
+        "MR_GAME_PRESENTATION must be raw, pipelined, or lace; got '${MR_GAME_PRESENTATION}'")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -99,7 +101,9 @@ set(MR_ILI9341_MADCTL 0xE8     CACHE STRING "MADCTL orientation byte")
 # Panel refresh rate (FRMCTR1). Defaults reproduce the ILI9341 reset state,
 # about 70 Hz. Lower RTNA is faster: 0x19=76Hz, 0x16=86Hz, 0x13=100Hz,
 # 0x10=119Hz. Only meaningful if the presentation rate actually exceeds 70 FPS.
-set(MR_STRESS_LACE_PHASES 2 CACHE STRING "Lace phases; 1 = every row every frame")
+set(MR_STRESS_LACE_PHASES 2 CACHE STRING "Stress lace phases; 1 = every row every frame")
+set(MR_GAME_LACE_PHASES 4 CACHE STRING "Game temporal presentation phases")
+set(MR_GAME_LACE_BLOCK_H 8 CACHE STRING "Game temporal row-group height")
 set(MR_ILI9341_FRMCTR1_DIVA 0x00 CACHE STRING "FRMCTR1 fosc division ratio (0-3)")
 set(MR_ILI9341_FRMCTR1_RTNA 0x1B CACHE STRING "FRMCTR1 clocks per line; lower is faster")
 
@@ -222,6 +226,25 @@ if(MR_TILE_H LESS 1 OR MR_TILE_H GREATER MR_SCREEN_H)
         "MR_TILE_H must be in the range 1..MR_SCREEN_H; got ${MR_TILE_H}")
 endif()
 
+if(MR_APP STREQUAL "GAME" AND MR_GAME_PRESENT_MODE EQUAL 2)
+    if(NOT "${MR_GAME_LACE_PHASES}" MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR
+            "MR_GAME_LACE_PHASES must be a positive integer; got '${MR_GAME_LACE_PHASES}'")
+    endif()
+    if(NOT "${MR_GAME_LACE_BLOCK_H}" MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR
+            "MR_GAME_LACE_BLOCK_H must be a positive integer; got '${MR_GAME_LACE_BLOCK_H}'")
+    endif()
+    math(EXPR MR_GAME_LACE_PERIOD_H
+         "${MR_GAME_LACE_PHASES} * ${MR_GAME_LACE_BLOCK_H}")
+    if(NOT MR_TILE_H EQUAL MR_GAME_LACE_PERIOD_H)
+        message(FATAL_ERROR
+            "Game lace requires MR_TILE_H = block_h * phases = "
+            "${MR_GAME_LACE_BLOCK_H} * ${MR_GAME_LACE_PHASES} = "
+            "${MR_GAME_LACE_PERIOD_H}; got ${MR_TILE_H}")
+    endif()
+endif()
+
 # The raw reference paths intentionally render one complete logical frame and
 # only then begin the synchronous LCD transfer. A shorter tile would interleave
 # drawing and presentation and would no longer represent clear/draw/send/loop.
@@ -287,6 +310,7 @@ set(MR_SOURCES
     "${MR_SHARED_SRC}/gfx_rgb444.c"
     "${MR_SHARED_SRC}/mr_strbuf.c"
     "${MR_SHARED_RP2350}/mr_pico_ili9341.c"
+    "${MR_SHARED_RP2350}/mr_pico_temporal_present.c"
     "${MR_SHARED_RP2350}/mr_pico_screenshot.c"
     "${MR_GENERATED_C}"
 )
@@ -368,6 +392,8 @@ target_compile_definitions(microrender PRIVATE
     MR_PICO_USB_STDIO=$<BOOL:${MR_PICO_USB_STDIO}>
     MR_PICO_GAME_SERIAL=$<BOOL:${MR_PICO_GAME_SERIAL}>
     MR_GAME_PRESENT_MODE=${MR_GAME_PRESENT_MODE}
+    MR_GAME_LACE_PHASES=${MR_GAME_LACE_PHASES}
+    MR_GAME_LACE_BLOCK_H=${MR_GAME_LACE_BLOCK_H}
 )
 
 if(MR_APP STREQUAL "STRESS")
@@ -461,6 +487,11 @@ if(MR_APP STREQUAL "STRESS")
                    "fixed_camera=${MR_STRESS_FIXED_CAMERA}) sprites=${MR_STRESS_SPRITES}")
 else()
     message(STATUS "MicroRender: game presentation=${MR_GAME_PRESENTATION}")
+    if(MR_GAME_PRESENT_MODE EQUAL 2)
+        message(STATUS
+            "MicroRender: game lace block_h=${MR_GAME_LACE_BLOCK_H} "
+            "phases=${MR_GAME_LACE_PHASES}")
+    endif()
 endif()
 message(STATUS "MicroRender: panel=${MR_LCD_PANEL} ${MR_SCREEN_W}x${MR_SCREEN_H} "
                "tile_h=${MR_TILE_H} view_h=${MR_VIEW_H} "
